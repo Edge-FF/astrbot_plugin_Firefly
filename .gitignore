@@ -4,7 +4,6 @@ __pycache__/
 .pytest_cache/
 .venv/
 
-# 插件运行时数据（不入库）
-data/cmd_config.json
-data/temp/
-data/*.log
+# AstrBot 运行时数据目录：不应出现在插件内
+# （插件数据请使用 star.StarTools.get_data_dir()，即 data/plugin_data/<插件名>/）
+data/
