@@ -1,0 +1,10 @@
+# Python 缓存
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+
+# 插件运行时数据（不入库）
+data/cmd_config.json
+data/temp/
+data/*.log

@@ -1,0 +1,303 @@
+{
+    "enabled": {
+        "description": "总开关：是否启用认知外壳注入",
+        "type": "bool",
+        "default": true,
+        "hint": "关闭后插件不再向 LLM 请求注入认知外壳，动态状态也不会被更新。"
+    },
+    "inject": {
+        "description": "注入设置",
+        "type": "object",
+        "items": {
+            "max_tokens": {
+                "description": "认知外壳整体 token 预算",
+                "type": "int",
+                "default": 1500,
+                "hint": "超出预算时先裁剪激活条目（按 strength 降序），Tier1/2 优先保证完整。",
+                "slider": {
+                    "min": 200,
+                    "max": 8000,
+                    "step": 100
+                }
+            },
+            "tier1_reserved": {
+                "description": "Tier1（核心人格）预留 token 预算",
+                "type": "int",
+                "default": 600,
+                "hint": "核心人格不可裁剪，此为预估上限。",
+                "slider": {
+                    "min": 100,
+                    "max": 3000,
+                    "step": 50
+                }
+            },
+            "max_on_demand": {
+                "description": "单次请求最多通过关键词路由激活的条目数",
+                "type": "int",
+                "default": 5,
+                "hint": "仅影响 KeywordRouter 兜底模式，LLM 路由不受此限制。",
+                "slider": {
+                    "min": 0,
+                    "max": 15,
+                    "step": 1
+                }
+            },
+            "enabled_sessions": {
+                "description": "限定生效的会话 UMO 列表（留空表示所有会话生效）",
+                "type": "list",
+                "default": [],
+                "hint": "格式示例: default:FriendMessage:123456789。留空则全部会话生效。"
+            }
+        }
+    },
+    "router": {
+        "description": "上下文路由器设置",
+        "type": "object",
+        "items": {
+            "use_llm": {
+                "description": "是否启用 LLM 语义路由",
+                "type": "bool",
+                "default": false,
+                "hint": "开启后每轮对话会调用一次微型 LLM 进行语义路由（约 200 token 输入）。关闭后降级为关键词路由。"
+            },
+            "llm_timeout_seconds": {
+                "description": "LLM 路由超时时间（秒）",
+                "type": "float",
+                "default": 3.0,
+                "hint": "超时后自动降级到关键词路由。"
+            },
+            "fallback_to_keyword": {
+                "description": "LLM 路由失败时是否降级到关键词路由",
+                "type": "bool",
+                "default": true,
+                "hint": "确保任何情况下都有兜底路径。"
+            },
+            "cache_enabled": {
+                "description": "路由结果缓存",
+                "type": "bool",
+                "default": true,
+                "hint": "相同上下文哈希命中时复用路由结果，避免重复 LLM 调用。"
+            }
+        }
+    },
+    "state": {
+        "description": "动态状态设置",
+        "type": "object",
+        "items": {
+            "persist": {
+                "description": "是否持久化动态状态到磁盘",
+                "type": "bool",
+                "default": true,
+                "hint": "关闭后动态状态仅保存在内存中，插件重启即重置。"
+            },
+            "use_llm": {
+                "description": "是否启用 LLM 状态推断（关键词路由模式下的可选补充）",
+                "type": "bool",
+                "default": false,
+                "hint": "仅在路由降级到关键词时生效，LLM 路由模式下状态信号由路由阶段产出。"
+            },
+            "decay_hours": {
+                "description": "硬性回落阈值（小时，0 表示关闭）",
+                "type": "float",
+                "default": 0.0,
+                "hint": "超过该时长无互动时心情硬性回落到「平静」。设为 0 时改由各心情的半衰期自然衰减（推荐）。",
+                "slider": {
+                    "min": 0,
+                    "max": 72,
+                    "step": 1
+                }
+            },
+            "max_topics": {
+                "description": "保留的最近话题条数",
+                "type": "int",
+                "default": 5,
+                "hint": "最近话题按时间倒序保留，超出后丢弃最旧的话题。",
+                "slider": {
+                    "min": 1,
+                    "max": 20,
+                    "step": 1
+                }
+            }
+        }
+    },
+    "active_context": {
+        "description": "激活上下文惯性设置",
+        "type": "object",
+        "items": {
+            "default_skill_ttl": {
+                "description": "Skill 类条目的默认激活轮数",
+                "type": "int",
+                "default": 4,
+                "hint": "skill 激活后维持 4 轮。",
+                "slider": {
+                    "min": 1,
+                    "max": 10,
+                    "step": 1
+                }
+            },
+            "default_lore_ttl": {
+                "description": "Lore/世界观 类条目的默认激活轮数",
+                "type": "int",
+                "default": 2,
+                "hint": "NPC/Wiki 资料激活后维持 2 轮。",
+                "slider": {
+                    "min": 1,
+                    "max": 8,
+                    "step": 1
+                }
+            },
+            "default_narrative_ttl": {
+                "description": "Narrative/叙事 类条目的默认激活轮数",
+                "type": "int",
+                "default": 6,
+                "hint": "叙事线条目持续性最强。",
+                "slider": {
+                    "min": 1,
+                    "max": 15,
+                    "step": 1
+                }
+            },
+            "strength_decay_per_turn": {
+                "description": "每轮 strength 衰减量",
+                "type": "float",
+                "default": 0.2,
+                "hint": "1.0→0.8→0.6→...→min_strength。"
+            },
+            "min_strength": {
+                "description": "strength 最低保留值",
+                "type": "float",
+                "default": 0.3,
+                "hint": "确保尾部轮次仍有弱注入（标记为「背景参考」）。"
+            }
+        }
+    },
+    "content_cache": {
+        "description": "内容缓存设置",
+        "type": "object",
+        "items": {
+            "max_entries": {
+                "description": "LRU 内容缓存上限（条）",
+                "type": "int",
+                "default": 50,
+                "hint": "超出后淘汰最久未使用的条目。",
+                "slider": {
+                    "min": 10,
+                    "max": 200,
+                    "step": 10
+                }
+            }
+        }
+    },
+    "proactive": {
+        "description": "主动消息设置（情绪驱动的冲动值模型）",
+        "type": "object",
+        "items": {
+            "enabled": {
+                "description": "是否启用主动消息",
+                "type": "bool",
+                "default": false,
+                "hint": "开启后插件会周期性评估「她是否想找你」，满足条件才主动发起。"
+            },
+            "tick_interval_seconds": {
+                "description": "后台评估间隔（秒）",
+                "type": "float",
+                "default": 120.0,
+                "hint": "仅做纯计算，不调用 LLM；真正的 LLM 调用只发生在决定发起时。",
+                "slider": {
+                    "min": 30,
+                    "max": 1800,
+                    "step": 30
+                }
+            },
+            "min_contact_gap_minutes": {
+                "description": "距上次任何接触的最短静默（分钟）",
+                "type": "int",
+                "default": 30,
+                "hint": "你刚说完话时不会被打扰；也用于防止连续发起。",
+                "slider": {
+                    "min": 0,
+                    "max": 720,
+                    "step": 5
+                }
+            },
+            "min_proactive_interval_minutes": {
+                "description": "两次主动消息的最小间隔（分钟）",
+                "type": "int",
+                "default": 60,
+                "hint": "防止短时间内反复主动。",
+                "slider": {
+                    "min": 0,
+                    "max": 1440,
+                    "step": 10
+                }
+            },
+            "max_unanswered": {
+                "description": "连续未回复上限",
+                "type": "int",
+                "default": 4,
+                "hint": "达到上限后暂停主动，避免骚扰（0 表示不限制）。",
+                "slider": {
+                    "min": 0,
+                    "max": 20,
+                    "step": 1
+                }
+            },
+            "max_per_day": {
+                "description": "每日主动上限",
+                "type": "int",
+                "default": 6,
+                "hint": "0 表示不限制。",
+                "slider": {
+                    "min": 0,
+                    "max": 48,
+                    "step": 1
+                }
+            },
+            "max_sends_per_tick": {
+                "description": "单次评估周期最多发送的条数",
+                "type": "int",
+                "default": 1,
+                "hint": "防止重启或跨天后多个会话同时被触发，改为分批发送。",
+                "slider": {
+                    "min": 1,
+                    "max": 10,
+                    "step": 1
+                }
+            },
+            "silence_hours": {
+                "description": "静默多久后开始「想念」（小时）",
+                "type": "float",
+                "default": 6.0,
+                "hint": "超过该时长没有互动，她的心情会自然转为想念，从而更可能主动找你。",
+                "slider": {
+                    "min": 1,
+                    "max": 72,
+                    "step": 1
+                }
+            },
+            "quiet_hours": {
+                "description": "免打扰时段",
+                "type": "string",
+                "default": "1-7",
+                "hint": "格式 起始-结束（小时），支持跨天如 23-6。"
+            },
+            "startup_grace_seconds": {
+                "description": "启动宽限期（秒）",
+                "type": "float",
+                "default": 120.0,
+                "hint": "插件启动后该时段内不发起，避免重启后集中打扰。",
+                "slider": {
+                    "min": 0,
+                    "max": 3600,
+                    "step": 30
+                }
+            },
+            "sessions": {
+                "description": "限定生效的会话 UMO 列表（留空表示所有会话生效）",
+                "type": "list",
+                "default": [],
+                "hint": "建议先只填一个测试会话，确认手感后再放开。"
+            }
+        }
+    }
+}

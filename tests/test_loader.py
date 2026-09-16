@@ -1,0 +1,215 @@
+"""core.parsers 与 core.registry 的单元测试。"""
+
+from __future__ import annotations
+
+import tempfile
+import unittest
+from pathlib import Path
+
+from astrbot_plugin_Firefly.core.parsers import (
+    parse_frontmatter,
+    strip_html_comments,
+)
+from astrbot_plugin_Firefly.core.models import MaterialEntry
+from astrbot_plugin_Firefly.core.registry import MaterialRegistry
+
+
+def _write(role_dir: Path, rel: str, text: str) -> None:
+    """在 role 目录下写入一个文件（自动创建父目录）。
+
+    Args:
+        role_dir: role 目录路径。
+        rel: 相对路径。
+        text: 文件内容。
+    """
+    path = role_dir / rel
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+
+
+class TestParseFrontmatter(unittest.TestCase):
+    def test_no_frontmatter(self):
+        """验证无 front-matter 时原样返回。"""
+        meta, body = parse_frontmatter("hello")
+        self.assertEqual(meta, {})
+        self.assertEqual(body, "hello")
+
+    def test_scalars_and_list(self):
+        """验证标量与列表字段的解析。"""
+        text = """---
+type: on_demand
+title: 战斗技巧
+priority: 80
+keywords: ["战斗", "打架"]
+enabled: true
+---
+正文内容
+"""
+        meta, body = parse_frontmatter(text)
+        self.assertEqual(meta["type"], "on_demand")
+        self.assertEqual(meta["priority"], 80)
+        self.assertEqual(meta["keywords"], ["战斗", "打架"])
+        self.assertTrue(meta["enabled"])
+        self.assertEqual(body, "正文内容")
+
+    def test_strip_html_comments(self):
+        """验证 HTML 注释被清除。"""
+        text = "<!-- 占位说明 -->\n正文内容\n<!-- 结尾注释 -->"
+        self.assertEqual(strip_html_comments(text), "\n正文内容\n")
+
+
+class TestMaterialRegistry(unittest.TestCase):
+    """MaterialRegistry 测试。"""
+
+    def test_full_scan_with_tiers(self):
+        """验证中文目录结构下 tier 的完整扫描。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            role_dir = Path(tmp)
+            _write(
+                role_dir, "基础人设.md",
+                "---\nid: persona_base\ntitle: 基础人设\n---\n我是流萤。",
+            )
+            _write(
+                role_dir, "故事/自我叙事.md",
+                "---\nid: persona_narrative\n---\n叙事人格。",
+            )
+            _write(
+                role_dir, "技能/战斗.md",
+                "---\nid: skill_battle\nkind: skill\nkeywords: [战斗]\npriority: 80\n---\n战斗说明。",
+            )
+            _write(
+                role_dir, "人物关系/卡芙卡.md",
+                "---\nid: kafka\ntitle: 卡芙卡\nkind: lore\ntags: [星核猎手]\n---\n卡芙卡资料。",
+            )
+
+            registry = MaterialRegistry(role_dir, cache_size=50)
+            report = registry.load()
+
+            t1 = registry.get_tier(1)
+            self.assertEqual(len(t1), 2)
+
+            t2 = registry.get_tier(2)
+            self.assertEqual(len(t2), 0)
+
+            t3 = registry.get_tier(3)
+            self.assertEqual(len(t3), 2)
+
+            self.assertEqual(registry.entry_count, 4)
+
+    def test_lazy_loading(self):
+        """验证 Tier3 内容为懒加载。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            role_dir = Path(tmp)
+            _write(
+                role_dir, "技能/测试技能.md",
+                "---\nid: test_skill\nkind: skill\n---\n懒加载测试内容。",
+            )
+            registry = MaterialRegistry(role_dir)
+            report = registry.load()
+
+            all_entries = registry.all_entries()
+            skill = [e for e in all_entries if e.id == "test_skill"][0]
+            self.assertIsNone(skill.content)
+
+            fetched = registry.fetch(["test_skill"])
+            self.assertEqual(fetched[0].content, "懒加载测试内容。")
+
+    def test_tier_inference_chinese(self):
+        """验证中文目录自动推断 tier/kind。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            role_dir = Path(tmp)
+            _write(role_dir, "基础人设.md", "---\n---\nTier1 内容。")
+            _write(role_dir, "故事/自我叙事.md", "---\n---\nTier1 叙事人格内容。")
+            _write(role_dir, "技能/skill_x.md", "---\n---\nTier3 内容。")
+            _write(role_dir, "人物关系/npc_1.md", "---\n---\nTier3 内容。")
+
+            registry = MaterialRegistry(role_dir)
+            report = registry.load()
+            self.assertFalse(report.has_warnings(), f"warnings: {report.warnings}")
+
+            for entry in registry.all_entries():
+                if entry.source_path.endswith("基础人设.md"):
+                    self.assertEqual(entry.tier, 1)
+                    self.assertEqual(entry.kind, "persona")
+                elif "故事" in entry.source_path:
+                    self.assertEqual(entry.tier, 1)
+                    self.assertEqual(entry.kind, "persona")
+                elif "技能" in entry.source_path or "人物关系" in entry.source_path:
+                    self.assertEqual(entry.tier, 3)
+
+    def test_frontmatter_overrides_auto_inference(self):
+        """验证 front-matter 显式声明的 tier 覆盖自动推断。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            role_dir = Path(tmp)
+            _write(role_dir, "custom/special.md", "---\ntier: 4\nkind: lore\n---\n内容。")
+            registry = MaterialRegistry(role_dir)
+            report = registry.load()
+            entry = [e for e in registry.all_entries() if e.id == "special"][0]
+            self.assertEqual(entry.tier, 4)
+            self.assertEqual(entry.kind, "lore")
+
+    def test_id_conflict_warning(self):
+        """验证重复 ID 产生告警。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            role_dir = Path(tmp)
+            _write(role_dir, "技能/a.md", "---\nid: same_id\n---\n内容A。")
+            _write(role_dir, "技能/b.md", "---\nid: same_id\n---\n内容B。")
+            registry = MaterialRegistry(role_dir)
+            report = registry.load()
+            self.assertTrue(report.has_warnings())
+            self.assertTrue(any("冲突" in w for w in report.warnings))
+
+    def test_index_summary(self):
+        """验证索引摘要包含条目 ID 与标签。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            role_dir = Path(tmp)
+            _write(role_dir, "基础人设.md", "---\nid: persona_base\ntitle: 基础\ntags: [人格]\n---\n内容。")
+            _write(role_dir, "技能/s1.md", "---\nid: s1\ntitle: 技能1\ntags: [战斗, 星核猎手]\n---\n内容。")
+            registry = MaterialRegistry(role_dir)
+            registry.load()
+            summary = registry.index_summary()
+            self.assertIn("persona_base", summary)
+            self.assertIn("s1", summary)
+            self.assertIn("标签", summary)
+
+    def test_reload_keeps_on_failure(self):
+        """验证重载失败时保留上一份快照。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            role_dir = Path(tmp)
+            _write(role_dir, "基础人设.md", "---\n---\n旧内容。")
+            registry = MaterialRegistry(role_dir)
+            report1 = registry.load()
+            self.assertEqual(registry.entry_count, 1)
+
+            import os
+            os.remove(role_dir / "基础人设.md")
+            report2 = registry.reload()
+            self.assertEqual(registry.entry_count, 1)
+            self.assertTrue(report2.has_warnings())
+
+    def test_missing_role_dir(self):
+        """验证目录缺失时安全返回告警。"""
+        registry = MaterialRegistry(Path("no_such_dir_xyz"))
+        report = registry.load()
+        self.assertFalse(registry.is_loaded)
+        self.assertTrue(report.has_warnings())
+
+    def test_lru_cache_eviction(self):
+        """验证 LRU 内容缓存不会无限增长。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            role_dir = Path(tmp)
+            for i in range(12):
+                _write(
+                    role_dir, f"技能/s{i}.md",
+                    f"---\nid: s{i}\n---\n内容{i}。",
+                )
+            registry = MaterialRegistry(role_dir, cache_size=5)
+            registry.load()
+            all_ids = [f"s{i}" for i in range(12)]
+            fetched = registry.fetch(all_ids)
+            self.assertEqual(len(fetched), 12)
+            self.assertLessEqual(len(registry._content_cache), 12)
+
+
+if __name__ == "__main__":
+    unittest.main()

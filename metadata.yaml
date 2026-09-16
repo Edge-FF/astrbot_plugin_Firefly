@@ -1,0 +1,5 @@
+name: astrbot_plugin_Firefly
+author: 项目维护者
+desc: 流萤认知外壳 v0.3：语义感知路由 + 激活惯性 + 事件驱动情绪 + 情绪驱动的主动消息。
+version: 0.3.0
+astrbot_version: ">=4.0.0"
