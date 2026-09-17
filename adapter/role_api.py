@@ -13,6 +13,7 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from .api.http import HttpHelpers
 from .debug_api import error, ok
 
 if TYPE_CHECKING:
@@ -21,8 +22,11 @@ if TYPE_CHECKING:
     from ..core.state import StateStore
 
 
-class RoleApi:
-    """资料管理面板的路由（只读 tree/file + 写路径 save/delete）。"""
+class RoleApi(HttpHelpers):
+    """资料管理面板的路由（只读 tree/file + 写路径 save/delete）。
+
+    请求解析辅助由 `HttpHelpers` 提供，与 `DebugApi` 共用同一份实现。
+    """
 
     def __init__(
         self,
@@ -237,20 +241,3 @@ class RoleApi:
             f"[认知外壳] 资料{action}：{path}（重载后 {reload_info['total']} 条，"
             f"告警 {len(reload_info['warnings'])} 条）"
         )
-
-    @staticmethod
-    async def _get_json() -> dict[str, Any]:
-        """读取请求体 JSON，解析失败时返回空字典。"""
-        from quart import request
-
-        try:
-            return await request.get_json() or {}
-        except Exception:
-            return {}
-
-    @staticmethod
-    def _get_query(key: str) -> str | None:
-        """读取请求查询参数（懒导入 quart，与 debug_api 写法一致）。"""
-        from quart import request
-
-        return request.args.get(key)

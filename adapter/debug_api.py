@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Any
 
 from ..core import consts
 from ..core.models import SessionState
+from .api.http import HttpHelpers
 
 if TYPE_CHECKING:
     from ..core.registry import MaterialRegistry
@@ -43,7 +44,13 @@ def error(message: str) -> dict[str, Any]:
     return {"status": "error", "message": str(message)}
 
 
-class DebugApi:
+class DebugApi(HttpHelpers):
+    """调试面板 Web API 混入类。
+
+    请求解析辅助（`_get_query` / `_get_json`）由 `HttpHelpers` 提供，
+    与 `RoleApi` 共用同一份实现。
+    """
+
     def __init__(
         self,
         context,
@@ -121,30 +128,6 @@ class DebugApi:
         reg(f"{P}/proactive", self._proactive_status, ["GET"], "")
         reg(f"{P}/proactive/decisions", self._proactive_decisions, ["GET"], "")
         reg(f"{P}/proactive/now", self._proactive_now, ["POST"], "")
-
-    @staticmethod
-    def _get_query(key: str) -> str | None:
-        """读取请求查询参数。
-
-        Args:
-            key: 参数名。
-
-        Returns:
-            参数值或 None。
-        """
-        from quart import request
-
-        return request.args.get(key)
-
-    @staticmethod
-    async def _get_json() -> dict[str, Any]:
-        """读取请求体 JSON，解析失败时返回空字典。"""
-        from quart import request
-
-        try:
-            return await request.get_json() or {}
-        except Exception:
-            return {}
 
     @staticmethod
     def _state_to_dict(s: SessionState) -> dict[str, Any]:
