@@ -10,6 +10,7 @@ import json
 import os
 import tempfile
 from pathlib import Path
+from typing import Any
 
 from .models import SessionState
 
@@ -24,15 +25,22 @@ class StateStore:
     - 全部可变操作由 asyncio.Lock 串行化。
     """
 
-    def __init__(self, data_file: Path, persist: bool = True) -> None:
+    def __init__(
+        self,
+        data_file: Path,
+        persist: bool = True,
+        logger: Any = None,
+    ) -> None:
         """初始化状态仓库。
 
         Args:
             data_file: 状态持久化文件路径。
             persist: 是否启用落盘持久化。
+            logger: 可选的日志记录器；落盘失败时用于告警，避免静默丢数据。
         """
         self._data_file = Path(data_file)
         self._persist = persist
+        self._logger = logger
         self._lock = asyncio.Lock()
         self._states: dict[str, SessionState] = {}
 
@@ -121,8 +129,12 @@ class StateStore:
             finally:
                 if os.path.exists(tmp_path):
                     os.remove(tmp_path)
-        except OSError:
-            pass
+        except OSError as exc:
+            # 落盘失败必须可见：否则用户会以为状态已保存，实际已丢失
+            if self._logger is not None:
+                self._logger.warning(
+                    f"[认知外壳] 动态状态落盘失败，本次未持久化：{exc}"
+                )
 
     async def close(self) -> None:
         """插件终止时的最终落盘。"""

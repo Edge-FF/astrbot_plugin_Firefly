@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import tempfile
 import unittest
 from pathlib import Path
@@ -134,6 +135,36 @@ class TestStateStore(IsolatedAsyncioTestCase):
             await store.close()
             payload = json.loads(data_file.read_text(encoding="utf-8"))
             self.assertIn("s1", payload)
+
+    async def test_persist_failure_is_logged(self):
+        """P1-6 S1：落盘失败必须留下告警，不得静默丢数据。
+
+        构造方式：让状态文件的父路径是一个普通文件，使 mkdir 抛 OSError。
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            blocker = Path(tmp) / "blocker"
+            blocker.write_text("not a directory", encoding="utf-8")
+            logger = logging.getLogger("test_state_persist_failure")
+            store = StateStore(blocker / "state.json", logger=logger)
+
+            with self.assertLogs(logger, level="WARNING") as captured:
+                await store.set("s1", SessionState(session_id="s1"))
+
+            self.assertTrue(
+                any("落盘失败" in message for message in captured.output),
+                f"未记录落盘失败告警：{captured.output}",
+            )
+
+    async def test_persist_failure_without_logger_still_does_not_raise(self):
+        """未注入 logger 时落盘失败仍不得抛异常（保持原有容错语义）。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            blocker = Path(tmp) / "blocker"
+            blocker.write_text("not a directory", encoding="utf-8")
+            store = StateStore(blocker / "state.json")
+
+            await store.set("s1", SessionState(session_id="s1"))
+
+            self.assertEqual((await store.get("s1")).session_id, "s1")
 
 
 class TestSessionStateSnapshot(unittest.TestCase):

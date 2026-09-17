@@ -87,7 +87,11 @@ class FireflyPlugin(FireflyCommandMixin, star.Star):
             self._role_dir,
             cache_size=cfg.content_cache_max_entries,
         )
-        store = StateStore(data_dir / "cognitive_state.json", persist=cfg.persist_state)
+        store = StateStore(
+            data_dir / "cognitive_state.json",
+            persist=cfg.persist_state,
+            logger=self.logger,
+        )
 
         affect = AffectEngine()
 
