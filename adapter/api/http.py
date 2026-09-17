@@ -50,3 +50,27 @@ class HttpHelpers:
             return await request.get_json() or {}
         except Exception:
             return {}
+
+
+def ok(data: Any = None) -> dict[str, Any]:
+    """构造成功响应体。
+
+    Args:
+        data: 响应数据。
+
+    Returns:
+        形如 {"status": "ok", "data": ...} 的字典。
+    """
+    return {"status": "ok", "data": data}
+
+
+def error(message: str) -> dict[str, Any]:
+    """构造错误响应体。
+
+    Args:
+        message: 错误信息。
+
+    Returns:
+        形如 {"status": "error", "message": ...} 的字典。
+    """
+    return {"status": "error", "message": str(message)}
