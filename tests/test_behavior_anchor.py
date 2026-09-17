@@ -25,8 +25,9 @@ from astrbot_plugin_Firefly.adapter.injector import CognitiveShellInjector
 from astrbot_plugin_Firefly.core.affect import AffectEngine
 from astrbot_plugin_Firefly.core.assembly import ShellAssembly
 from astrbot_plugin_Firefly.core.builder import ShellBuilder
+from astrbot_plugin_Firefly.core.config import ShellConfig
 from astrbot_plugin_Firefly.core.context_manager import ActiveContextManager
-from astrbot_plugin_Firefly.core.models import SessionState, ShellConfig
+from astrbot_plugin_Firefly.core.models import SessionState
 from astrbot_plugin_Firefly.core.registry import MaterialRegistry
 from astrbot_plugin_Firefly.core.router import KeywordRouter
 from astrbot_plugin_Firefly.core.state import StateStore

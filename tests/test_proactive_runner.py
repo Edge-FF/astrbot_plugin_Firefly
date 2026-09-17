@@ -13,11 +13,10 @@ from unittest import IsolatedAsyncioTestCase
 from astrbot_plugin_Firefly.adapter.debug_recorder import DebugRecorder
 from astrbot_plugin_Firefly.adapter.proactive_runner import ProactiveRunner
 from astrbot_plugin_Firefly.core.affect import AffectEngine
+from astrbot_plugin_Firefly.core.config import ProactiveConfig, ShellConfig
 from astrbot_plugin_Firefly.core.models import (
     BuildResult,
-    ProactiveConfig,
     SessionState,
-    ShellConfig,
 )
 from astrbot_plugin_Firefly.core.proactive import ProactivePolicy
 from astrbot_plugin_Firefly.core.state import StateStore

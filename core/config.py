@@ -1,0 +1,241 @@
+"""插件运行配置模型。
+
+从 `core.models` 拆出：这里描述的是「插件如何运行」（开关、预算、阈值），
+与「领域实体」（资料、会话状态、记录）是两类不同的东西，混在一个文件里
+会让每次调参都触碰领域模型。
+
+本模块为纯数据与纯解析：不依赖 astrbot、不访问 IO。
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Any
+
+
+@dataclass(frozen=True)
+class ShellConfig:
+    """插件运行配置（v0.2 扩展版）。"""
+
+    enabled: bool = True
+    max_tokens: int = 1500
+    max_on_demand: int = 3
+    enabled_sessions: tuple[str, ...] = ()
+
+    # 注入预算
+    tier1_reserved: int = 600
+
+    # 路由器
+    router_use_llm: bool = True
+    router_llm_timeout: float = 3.0
+    router_fallback_to_keyword: bool = True
+    router_cache_enabled: bool = True
+
+    # 状态
+    persist_state: bool = True
+    state_use_llm: bool = False
+    decay_hours: float = 0.0
+    max_topics: int = 5
+
+    # 激活上下文
+    default_skill_ttl: int = 4
+    default_lore_ttl: int = 2
+    default_narrative_ttl: int = 6
+    strength_decay_per_turn: float = 0.2
+    min_strength: float = 0.3
+
+    # 内容缓存
+    content_cache_max_entries: int = 50
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any] | None) -> ShellConfig:
+        """从插件配置字典构建 ShellConfig，缺失字段使用默认值。
+
+        Args:
+            data: _conf_schema.json 对应的配置字典，可为 None。
+
+        Returns:
+            填充好默认值的 ShellConfig。
+        """
+        data = data or {}
+        inject = data.get("inject", {}) or {}
+        state_cfg = data.get("state", {}) or {}
+        router_cfg = data.get("router", {}) or {}
+        active_cfg = data.get("active_context", {}) or {}
+        cache_cfg = data.get("content_cache", {}) or {}
+
+        def _int(value: Any, default: int) -> int:
+            """安全转 int，失败时返回默认值。"""
+            try:
+                return int(value)
+            except (TypeError, ValueError):
+                return default
+
+        def _float(value: Any, default: float) -> float:
+            """安全转 float，失败时返回默认值。"""
+            try:
+                return float(value)
+            except (TypeError, ValueError):
+                return default
+
+        def _bool(value: Any, default: bool) -> bool:
+            """安全转 bool：布尔直用，字符串按常见真值解析，其余返回默认值。"""
+            if isinstance(value, bool):
+                return value
+            if isinstance(value, str):
+                return value.strip().lower() in ("1", "true", "yes", "on")
+            return default
+
+        enabled_sessions = inject.get("enabled_sessions", []) or []
+        if isinstance(enabled_sessions, str):
+            enabled_sessions = [enabled_sessions]
+
+        return cls(
+            enabled=_bool(data.get("enabled"), True),
+            max_tokens=_int(inject.get("max_tokens"), 1500),
+            max_on_demand=_int(inject.get("max_on_demand"), 3),
+            enabled_sessions=tuple(str(s) for s in enabled_sessions if str(s).strip()),
+            tier1_reserved=_int(inject.get("tier1_reserved"), 600),
+            router_use_llm=_bool(router_cfg.get("use_llm"), False),
+            router_llm_timeout=_float(router_cfg.get("llm_timeout_seconds"), 3.0),
+            router_fallback_to_keyword=_bool(
+                router_cfg.get("fallback_to_keyword"), True
+            ),
+            router_cache_enabled=_bool(router_cfg.get("cache_enabled"), True),
+            persist_state=_bool(state_cfg.get("persist"), True),
+            state_use_llm=_bool(state_cfg.get("use_llm"), False),
+            decay_hours=_float(state_cfg.get("decay_hours"), 0.0),
+            max_topics=_int(state_cfg.get("max_topics"), 5),
+            default_skill_ttl=_int(active_cfg.get("default_skill_ttl"), 4),
+            default_lore_ttl=_int(active_cfg.get("default_lore_ttl"), 2),
+            default_narrative_ttl=_int(active_cfg.get("default_narrative_ttl"), 6),
+            strength_decay_per_turn=_float(
+                active_cfg.get("strength_decay_per_turn"), 0.2
+            ),
+            min_strength=_float(active_cfg.get("min_strength"), 0.3),
+            content_cache_max_entries=_int(cache_cfg.get("max_entries"), 50),
+        )
+
+    def is_session_enabled(self, session_id: str) -> bool:
+        """判断指定会话是否在启用名单内。
+
+        Args:
+            session_id: 会话唯一标识。
+
+        Returns:
+            启用名单为空时所有会话放行；否则仅在名单内返回 True。
+        """
+        if not self.enabled_sessions:
+            return True
+        return session_id in self.enabled_sessions
+
+    def get_default_ttl(self, kind: str) -> int:
+        """按资料类型获取默认激活轮数。
+
+        Args:
+            kind: 资料类型（skill/lore/narrative 等）。
+
+        Returns:
+            对应的默认 TTL；未知类型返回 1。
+        """
+        if kind == "skill":
+            return self.default_skill_ttl
+        if kind == "lore":
+            return self.default_lore_ttl
+        if kind == "narrative":
+            return self.default_narrative_ttl
+        return 1
+
+
+@dataclass(frozen=True)
+class ProactiveConfig:
+    """主动消息运行配置（v1）。
+
+    触发模型为「冲动值越阈值」，非随机区间；所有时间量均可用时间戳惰性计算。
+    """
+
+    enabled: bool = False
+    tick_interval_seconds: float = 120.0
+    min_contact_gap_minutes: int = 30
+    min_proactive_interval_minutes: int = 60
+    max_unanswered: int = 4
+    max_per_day: int = 6
+    max_sends_per_tick: int = 1
+    silence_hours: float = 6.0
+    quiet_hours: str = "1-7"
+    startup_grace_seconds: float = 120.0
+    sessions: tuple[str, ...] = ()
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any] | None) -> ProactiveConfig:
+        """从插件配置字典构建 ProactiveConfig，缺失字段使用默认值。
+
+        Args:
+            data: _conf_schema.json 对应的配置字典，可为 None。
+
+        Returns:
+            填充好默认值的 ProactiveConfig。
+        """
+        data = data or {}
+        cfg = data.get("proactive", {}) or {}
+
+        def _bool(value: Any, default: bool) -> bool:
+            """安全转 bool。"""
+            if isinstance(value, bool):
+                return value
+            if isinstance(value, str):
+                return value.strip().lower() in ("1", "true", "yes", "on")
+            return default
+
+        def _int(value: Any, default: int) -> int:
+            """安全转 int。"""
+            try:
+                return int(value)
+            except (TypeError, ValueError):
+                return default
+
+        def _float(value: Any, default: float) -> float:
+            """安全转 float。"""
+            try:
+                return float(value)
+            except (TypeError, ValueError):
+                return default
+
+        sessions = cfg.get("sessions", []) or []
+        if isinstance(sessions, str):
+            sessions = [sessions]
+
+        return cls(
+            enabled=_bool(cfg.get("enabled"), False),
+            tick_interval_seconds=max(
+                _float(cfg.get("tick_interval_seconds"), 120.0), 10.0
+            ),
+            min_contact_gap_minutes=max(
+                _int(cfg.get("min_contact_gap_minutes"), 30), 0
+            ),
+            min_proactive_interval_minutes=max(
+                _int(cfg.get("min_proactive_interval_minutes"), 60), 0
+            ),
+            max_unanswered=max(_int(cfg.get("max_unanswered"), 4), 0),
+            max_per_day=max(_int(cfg.get("max_per_day"), 6), 0),
+            max_sends_per_tick=max(_int(cfg.get("max_sends_per_tick"), 1), 1),
+            silence_hours=max(_float(cfg.get("silence_hours"), 6.0), 0.0),
+            quiet_hours=str(cfg.get("quiet_hours") or "1-7"),
+            startup_grace_seconds=max(
+                _float(cfg.get("startup_grace_seconds"), 120.0), 0.0
+            ),
+            sessions=tuple(str(s) for s in sessions if str(s).strip()),
+        )
+
+    def is_session_enabled(self, session_id: str) -> bool:
+        """判断会话是否在主动消息生效名单内。
+
+        Args:
+            session_id: 会话唯一标识。
+
+        Returns:
+            名单为空时全部放行；否则仅在名单内返回 True。
+        """
+        if not self.sessions:
+            return True
+        return session_id in self.sessions

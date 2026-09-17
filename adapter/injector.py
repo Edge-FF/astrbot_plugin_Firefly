@@ -28,13 +28,13 @@ from typing import TYPE_CHECKING, Any
 
 from ..core import consts
 from ..core.affect import EVENT_REUNION, AffectEngine, AffectEvent
+from ..core.config import ShellConfig
 from ..core.models import (
     BuildResult,
     InjectionRecord,
     RouteResult,
     RouteSignals,
     SessionState,
-    ShellConfig,
 )
 from ..core.updaters import update_recent_topics
 from . import astrbot_compat

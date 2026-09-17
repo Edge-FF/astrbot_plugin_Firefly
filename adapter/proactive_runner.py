@@ -23,7 +23,8 @@ from ..core.affect import (
     AffectEngine,
     AffectEvent,
 )
-from ..core.models import ProactiveConfig, ProactiveRecord, SessionState, ShellConfig
+from ..core.config import ProactiveConfig, ShellConfig
+from ..core.models import ProactiveRecord, SessionState
 from ..core.proactive import ProactivePolicy
 from .proactive_prompt import build_intent_prompt
 

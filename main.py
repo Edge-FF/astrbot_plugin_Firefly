@@ -27,8 +27,8 @@ from .adapter.proactive_runner import ProactiveRunner
 from .core.affect import AffectEngine
 from .core.assembly import ShellAssembly
 from .core.builder import ShellBuilder
+from .core.config import ProactiveConfig, ShellConfig
 from .core.context_manager import ActiveContextManager
-from .core.models import ProactiveConfig, ShellConfig
 from .core.proactive import ProactivePolicy
 from .core.registry import MaterialRegistry
 from .core.router import ContextRouter, FallbackRouter, KeywordRouter, LLMRouter

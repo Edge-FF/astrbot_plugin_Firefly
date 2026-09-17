@@ -5,7 +5,8 @@ from __future__ import annotations
 import unittest
 
 from astrbot_plugin_Firefly.core.affect import AffectEngine
-from astrbot_plugin_Firefly.core.models import ProactiveConfig, SessionState
+from astrbot_plugin_Firefly.core.config import ProactiveConfig
+from astrbot_plugin_Firefly.core.models import SessionState
 from astrbot_plugin_Firefly.core.proactive import (
     INTENT_CHECK,
     INTENT_MISS,
