@@ -132,6 +132,11 @@ ruff format --check core adapter main.py tests
 
 ## 3. 隐患与耦合清单
 
+> **修复进度**：**H1 / H2 / H3 / C1 / C2 / C3 / C4、S1 / S2 / S3 / S4 已在 P1 修复**（见 §5「P1 执行结果」）。
+> 仍待处理：**C5 / C6**（分别属 P2-3 与 P5-1）、**M1 / M2**（随 §7.1 决策）、
+> **B1–B6**（体量，P2–P4 拆分）、**X1 / X2 / X3 / X4**（附带发现，另行处理）。
+> 下表保留原始记录，作为问题来源与修复依据。
+
 ### 3.1 P0 — 会产生错误结果的缺陷
 
 | 编号 | 问题 | 位置 | 现象与影响 |
@@ -377,6 +382,42 @@ P1–P6 每新增一个断言，都应自问「把被测代码改坏，这条断
 
 > **本阶段允许改变行为**，但每一条都必须配一个能复现原缺陷的测试。
 > 每条 = 一个 commit，commit message 使用 `fix:` 前缀。
+
+#### ✅ P1 执行结果（已完成，10 个 commit）
+
+| 项 | 提交 | 内容 |
+|---|---|---|
+| P1-1 | `298c9b1` | `SessionState.snapshot()` 用序列化往返替代手工逐字段复制（字段清单 3 份 → 1 份） |
+| P1-2 | `b28cce6` | 新建 `adapter/astrbot_compat.py`；新增 `astrbot_api_unavailable` 能力闸门；架构规则 3 由 skip 转为生效 |
+| P1-3 | `0175b00` | 新建 `core/tier_rules.py`；`role_store` 的依赖集不再含 `registry` |
+| P1-4 | `533554b` | 删除不可达的 `_lookup_meta` 兜底（`registry.get()` 为 None 时它必然也为 None） |
+| P1-5 | `dab2d10` | `FallbackRouter` 迁入 `core/router.py`；`main.py` 不再含任何内联业务类 |
+| P1-6 S1 | `4c3f9e5` | 状态落盘失败改为告警（原 `except OSError: pass` 静默丢数据） |
+| P1-6 S2 | `fd91850` | LLM 路由失败改为 debug 留痕（原吞掉 `TimeoutError`/`Exception` 且无日志） |
+| P1-6 S3 | `d5c5412` | LLM 路由结果解析失败留痕（区分「模型判定不需要」与「解析失败」） |
+| P1-6 S4 | `e370065` | 懒加载读盘失败写入告警（保留空内容降级以避免重试风暴） |
+| P1-7 | `373476b` | 新建 `adapter/api/http.py`，`DebugApi` / `RoleApi` 共用一份请求解析实现 |
+
+**验证结果**：`Ran 198 tests — OK`（P0 结束时 165）；`ruff check core adapter main.py` 全通过；
+`ruff format --check core adapter main.py` 全部已格式化；`tests/` 的 lint 债仍为 11 处、
+格式债仍为 8 个文件（**无新增**）。
+
+**导入冒烟**（替代无法安全执行的真实环境启动）：`from astrbot_plugin_Firefly import main`
+成功加载，`DebugApi` / `RoleApi` 均正确继承 `HttpHelpers`，两个 AstrBot 内部 API 可用性标记均为 True。
+
+**10 个 `fix:` 提交全部做过反向验证**：把被测代码改坏一次，确认对应断言会失败（§6.7）。
+
+#### P1 对计划的三处偏离（均已确认必要性）
+
+| 项 | 计划 | 实际 | 原因 |
+|---|---|---|---|
+| P1-3 | 同时把 `_read_file` 移入 `tier_rules` | 只移 `infer_tier_kind` | `_read_file` 是仅服务 registry 的文件读取辅助，放进「规则」模块属职责错位；移动它只增加改动面 |
+| P1-5 | 新建 `core/fallback_router.py`，P3 再迁入子包 | 直接放入 `core/router.py` | 三个路由实现同模块更内聚，且省去 P3 的一次文件迁移 |
+| P1-7 | 模块级函数 `get_query()` / `get_json()` | 混入基类 `HttpHelpers` | 现有 API 测试通过**实例属性**打桩 `api._get_json`；改为模块级函数会让打桩静默失效（正是 P0 审查发现的「断言恒真」风险）。混入基类既只保留一份实现，又保持打桩语义，**两个 API 测试文件零改动仍全部通过** |
+
+> P1 对 `tests/` 既有文件的改动全部为**纯新增**（`test_state.py` +31、`test_matcher.py` +29/+16、
+> `test_loader.py` +23，删除行均为 0）：遵循 §2.3 的纪律，不顺手重排既有测试的格式。
+> `ruff format` 会对整个文件生效，因此对既有测试只跑 `--check`，只在确认格式债位置未变的前提下继续。
 
 #### P1-1 消除 `SessionState` 手工字段复制（H1）
 - 文件：`core/models.py`、`adapter/injector.py`
@@ -744,16 +785,16 @@ P1–P6 每新增一个断言，都应自问「把被测代码改坏，这条断
 
 ### 附录 C：执行检查清单
 
-- [x] **P0** 基线记录 + 锚点测试（3 个）+ 架构护栏测试（4 条，其中 1 条 gated 到 P1-2）；灵敏度已双向验证 ✅（见 §5「P0 执行结果」）
-      —— commit 待执行：`test: add injection behavior anchor and architecture guard tests`
-- [ ] **P1-1** `SessionState.snapshot()`；commit（`fix:`）
-- [ ] **P1-2** `astrbot_compat.py`；commit（`fix:`）
-- [ ] **P1-3** `core/tier_rules.py`；commit（`fix:`）
-- [ ] **P1-4** 删除 `_lookup_meta`；commit（`fix:`）
-- [ ] **P1-5** `FallbackRouter`；commit（`fix:`）
-- [ ] **P1-6** S1–S4 静默失败；4 个 commit（`fix:`）
-- [ ] **P1-7** 共享 HTTP 辅助函数；commit（`fix:`）
-- [ ] **P1 冒烟**（§6.5）
+- [x] **P0** 基线记录 + 锚点测试（3 个）+ 架构护栏测试（4 条，其中 1 条 gated 到 P1-2）；灵敏度已双向验证 ✅
+      —— 已提交：`f070490 docs:` / `0e5c5ca test:`
+- [x] **P1-1** `SessionState.snapshot()`；`298c9b1`
+- [x] **P1-2** `astrbot_compat.py`；`b28cce6`
+- [x] **P1-3** `core/tier_rules.py`；`0175b00`
+- [x] **P1-4** 删除 `_lookup_meta`；`533554b`
+- [x] **P1-5** `FallbackRouter`；`dab2d10`
+- [x] **P1-6** S1–S4 静默失败；4 个 commit：`4c3f9e5` / `fd91850` / `d5c5412` / `e370065`
+- [x] **P1-7** 共享 HTTP 辅助函数；`373476b`
+- [x] **P1 冒烟**（§6.5）—— 以「插件包导入冒烟 + 架构护栏 + 198 测试」替代真实启动；真实 AstrBot 启动需人工执行
 - [ ] **P2-1** `core/config.py`；commit（`refactor:`）
 - [ ] **P2-2** `core/records.py` + `adapter/dto.py`；commit（`refactor:`）
 - [ ] **P2-3** 统一 `coerce_*`；commit（`refactor:`）
