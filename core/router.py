@@ -252,3 +252,57 @@ class KeywordRouter:
             except re.error:
                 continue
         return score
+
+
+class FallbackRouter:
+    """组合路由：优先 LLM 语义路由，失败或未启用时降级关键词路由。
+
+    降级语义：
+    - 未提供 LLM 路由器 → 始终走关键词路由；
+    - LLM 返回 None（未启用/超时/解析失败）且允许降级 → 走关键词路由；
+    - LLM 返回 None 且禁止降级 → 返回空结果（本轮不激活任何条目）。
+
+    本类只负责「组合与降级」这一策略，不关心具体匹配方式，因此可脱离
+    AstrBot 与 IO 单测（原实现内联在插件装配文件中，无法单测）。
+    """
+
+    def __init__(
+        self,
+        llm: LLMRouter | None,
+        keyword: KeywordRouter,
+        fallback_to_keyword: bool = True,
+    ) -> None:
+        """初始化组合路由。
+
+        Args:
+            llm: LLM 语义路由器；为 None 表示未启用。
+            keyword: 关键词兜底路由器。
+            fallback_to_keyword: LLM 失败时是否降级到关键词路由。
+        """
+        self._llm = llm
+        self._keyword = keyword
+        self._fallback_to_keyword = fallback_to_keyword
+
+    async def route(
+        self,
+        user_msg: str,
+        session_state: SessionState,
+        registry: MaterialRegistry,
+    ) -> RouteResult:
+        """执行路由：先 LLM，失败时按配置降级关键词。
+
+        Args:
+            user_msg: 用户消息文本。
+            session_state: 当前会话状态。
+            registry: 资料注册表。
+
+        Returns:
+            路由结果；LLM 失败且禁止降级时返回空结果。
+        """
+        if self._llm is not None:
+            result = await self._llm.route(user_msg, session_state, registry)
+            if result is not None:
+                return result
+        if self._llm is None or self._fallback_to_keyword:
+            return await self._keyword.route(user_msg, session_state, registry)
+        return RouteResult(source="keyword")

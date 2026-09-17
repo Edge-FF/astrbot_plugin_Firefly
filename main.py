@@ -31,7 +31,7 @@ from .core.context_manager import ActiveContextManager
 from .core.models import ProactiveConfig, ShellConfig
 from .core.proactive import ProactivePolicy
 from .core.registry import MaterialRegistry
-from .core.router import ContextRouter, KeywordRouter, LLMRouter
+from .core.router import ContextRouter, FallbackRouter, KeywordRouter, LLMRouter
 from .core.state import StateStore
 
 
@@ -102,40 +102,10 @@ class FireflyPlugin(FireflyCommandMixin, star.Star):
             )
 
         keyword_router = KeywordRouter(max_entries=cfg.max_on_demand)
-
-        class CompositeRouter:
-            """组合路由：优先 LLM 语义路由，失败或禁用时降级关键词路由。"""
-
-            def __init__(
-                self, llm: LLMRouter | None, kw: KeywordRouter, fallback: bool
-            ):
-                """初始化组合路由。
-
-                Args:
-                    llm: LLM 路由实例，可为 None。
-                    kw: 关键词路由实例。
-                    fallback: LLM 失败时是否回退关键词路由。
-                """
-                self._llm = llm
-                self._kw = kw
-                self._fallback = fallback
-
-            async def route(self, user_msg, session_state, reg):
-                """执行路由：先 LLM 后关键词兜底。"""
-                if self._llm:
-                    result = await self._llm.route(user_msg, session_state, reg)
-                    if result is not None:
-                        return result
-                if self._fallback or self._llm is None:
-                    return await self._kw.route(user_msg, session_state, reg)
-                from .core.models import RouteResult
-
-                return RouteResult(source="keyword")
-
-        router: ContextRouter = CompositeRouter(
+        router: ContextRouter = FallbackRouter(
             llm=llm_router,
-            kw=keyword_router,
-            fallback=cfg.router_fallback_to_keyword,
+            keyword=keyword_router,
+            fallback_to_keyword=cfg.router_fallback_to_keyword,
         )  # type: ignore[assignment]
 
         ctx_manager = ActiveContextManager(
