@@ -233,6 +233,29 @@ class TestMaterialRegistry(unittest.TestCase):
             self.assertEqual(entry.tier, 4)
             self.assertEqual(entry.kind, "lore")
 
+    def test_lazy_load_failure_is_recorded_once(self):
+        """P1-6 S4：懒加载读盘失败必须留痕，且不重复重试读盘。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            role_dir = Path(tmp)
+            _write(role_dir, "技能/skill_x.md", "---\n---\n技能内容。")
+
+            registry = MaterialRegistry(role_dir)
+            registry.load()
+            # 索引建好后删除文件，制造懒加载读盘失败
+            (role_dir / "技能" / "skill_x.md").unlink()
+
+            entry = registry.get("skill_x")
+            self.assertEqual(entry.content, "")
+            self.assertTrue(
+                any("读取失败" in warning for warning in registry.warnings),
+                f"未记录懒加载失败：{registry.warnings}",
+            )
+
+            # 已降级为空内容，不应每次访问都重试读盘并重复告警
+            warnings_after_first_access = len(registry.warnings)
+            registry.get("skill_x")
+            self.assertEqual(len(registry.warnings), warnings_after_first_access)
+
     def test_id_conflict_warning(self):
         """验证重复 ID 产生告警。"""
         with tempfile.TemporaryDirectory() as tmp:

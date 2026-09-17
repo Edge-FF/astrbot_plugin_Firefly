@@ -268,7 +268,12 @@ class MaterialRegistry:
 
         content = _read_file(entry.source_path)
         if content is None:
+            # 保留空内容作为降级：is_loaded() 随之返回 True，避免每次访问都重试读盘。
+            # 但必须留下告警，否则「这个条目内容是空的」将毫无线索。
             entry.content = ""
+            self._last_warnings.append(
+                f"内容读取失败（已降级为空）：{entry.source_path}"
+            )
             return
 
         _, body = parse_frontmatter(content)
