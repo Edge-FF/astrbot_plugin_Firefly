@@ -112,7 +112,7 @@ class LLMRouter:
                 self._llm_generate(_ROUTER_SYSTEM_PROMPT, user_input),
                 timeout=self._timeout,
             )
-            result = self._parse_response(raw, registry)
+            result = self._parse_response(raw, registry, self._logger)
             if self._cache_enabled:
                 self._cache[cache_key] = (time.time(), result)
             return result
@@ -150,8 +150,19 @@ class LLMRouter:
         )
 
     @staticmethod
-    def _parse_response(raw: str, registry: MaterialRegistry) -> RouteResult:
-        """解析 LLM 返回的 JSON，过滤非法 ID。"""
+    def _parse_response(
+        raw: str, registry: MaterialRegistry, logger: Any = None
+    ) -> RouteResult:
+        """解析 LLM 返回的 JSON，过滤非法 ID。
+
+        Args:
+            raw: LLM 原始输出。
+            registry: 资料注册表（用于过滤不存在的条目 ID）。
+            logger: 可选的日志记录器；解析失败时用于留痕。
+
+        Returns:
+            解析出的路由结果；失败时返回空结果（source 仍标记为 llm）。
+        """
         try:
             text = raw.strip()
             # 提取 JSON 块
@@ -175,7 +186,12 @@ class LLMRouter:
                 user_emotion=signals_raw.get("user_emotion"),
             )
             return RouteResult(needed_ids=valid_ids, signals=signals, source="llm")
-        except (json.JSONDecodeError, TypeError, AttributeError):
+        except (json.JSONDecodeError, TypeError, AttributeError) as exc:
+            # 必须留痕：否则无法区分「模型判定不需要资料」与「结果解析失败」
+            if logger is not None:
+                logger.debug(
+                    f"[认知外壳] LLM 路由结果解析失败，本轮不激活条目：{exc!r}"
+                )
             return RouteResult(source="llm")
 
     def _cache_key(self, user_msg: str, session_state: SessionState) -> str:

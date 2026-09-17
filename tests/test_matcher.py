@@ -149,6 +149,22 @@ class TestLLMRouter(unittest.TestCase):
         result = LLMRouter._parse_response("not json", _make_fake_registry([]))
         self.assertEqual(result.needed_ids, [])
 
+    def test_parse_failure_is_logged(self):
+        """P1-6 S3：解析失败必须留痕，以区分「模型没选」与「解析失败」。"""
+        logger = logging.getLogger("test_llm_router_parse_failure")
+
+        with self.assertLogs(logger, level="DEBUG") as captured:
+            result = LLMRouter._parse_response(
+                "not json", _make_fake_registry([]), logger
+            )
+
+        self.assertEqual(result.needed_ids, [])
+        self.assertEqual(result.source, "llm")
+        self.assertTrue(
+            any("解析失败" in message for message in captured.output),
+            f"未记录解析失败：{captured.output}",
+        )
+
     def test_generate_failure_is_logged_and_returns_none(self):
         """P1-6 S2：LLM 调用异常必须留痕，且保持返回 None 的降级契约。"""
         logger = logging.getLogger("test_llm_router_failure")
