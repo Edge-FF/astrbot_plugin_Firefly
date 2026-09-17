@@ -205,15 +205,9 @@ class CognitiveShellInjector:
             self._record_skip(event, req, session_id, ts, skip_reason)
             return
 
-        # [A] 读取 SessionState
+        # [A] 读取 SessionState（快照用于记录注入前的状态，必须与后续变更隔离）
         state = await self._store.get(session_id)
-        state_before = SessionState(
-            session_id=state.session_id,
-            mood=state.mood,
-            mood_intensity=state.mood_intensity,
-            recent_topics=list(state.recent_topics),
-            active_context=state.active_context,
-        )
+        state_before = state.snapshot()
 
         # [B] ContextRouter.route()
         user_msg = getattr(event, "message_str", None) or req.prompt or ""

@@ -8,7 +8,11 @@ import unittest
 from pathlib import Path
 from unittest import IsolatedAsyncioTestCase
 
-from astrbot_plugin_Firefly.core.models import SessionState
+from astrbot_plugin_Firefly.core.models import (
+    ActivatedEntry,
+    ActiveContext,
+    SessionState,
+)
 from astrbot_plugin_Firefly.core.state import StateStore
 
 
@@ -51,7 +55,6 @@ class TestStateStore(IsolatedAsyncioTestCase):
             data_file = Path(tmp) / "state.json"
             store = StateStore(data_file)
             s = SessionState(session_id="s1")
-            from astrbot_plugin_Firefly.core.models import ActivatedEntry, ActiveContext
             s.active_context = ActiveContext(
                 entries=[
                     ActivatedEntry(
@@ -131,6 +134,77 @@ class TestStateStore(IsolatedAsyncioTestCase):
             await store.close()
             payload = json.loads(data_file.read_text(encoding="utf-8"))
             self.assertIn("s1", payload)
+
+
+class TestSessionStateSnapshot(unittest.TestCase):
+    """P1-1：SessionState.snapshot() 的等价性与可变对象隔离。"""
+
+    @staticmethod
+    def _make_source() -> SessionState:
+        """构造一份带有可变子对象的状态，用于验证快照隔离。
+
+        Returns:
+            含 recent_topics 与 active_context 的会话状态。
+        """
+        source = SessionState(
+            session_id="s1",
+            mood="委屈",
+            mood_intensity=0.8,
+            recent_topics=["取快递"],
+            unanswered_count=2,
+            last_user_at=111.0,
+        )
+        source.active_context = ActiveContext(
+            entries=[
+                ActivatedEntry(
+                    entry_id="skill_x",
+                    remaining_ttl=3,
+                    strength=0.8,
+                    activated_at_turn=1,
+                )
+            ],
+            turn_count=2,
+        )
+        return source
+
+    def test_snapshot_is_equal_to_source(self):
+        """快照与源状态逐字段等值。"""
+        source = self._make_source()
+        self.assertEqual(source.snapshot(), source)
+
+    def test_snapshot_does_not_share_mutable_objects(self):
+        """修改源状态的可变子对象不得影响快照。
+
+        浅拷贝（如 dataclasses.replace）会共享 recent_topics 与
+        active_context，本条断言用于检出该退化。
+        """
+        source = self._make_source()
+        snap = source.snapshot()
+
+        source.recent_topics.append("新话题")
+        source.active_context.entries.append(
+            ActivatedEntry(entry_id="skill_y", remaining_ttl=1)
+        )
+        source.active_context.turn_count = 99
+
+        self.assertEqual(snap.recent_topics, ["取快递"])
+        self.assertEqual(len(snap.active_context.entries), 1)
+        self.assertEqual(snap.active_context.entries[0].entry_id, "skill_x")
+        self.assertEqual(snap.active_context.turn_count, 2)
+
+    def test_snapshot_preserves_all_fields(self):
+        """快照保留全部字段（防止序列化往返丢字段）。"""
+        source = self._make_source()
+        snap = source.snapshot()
+        self.assertEqual(snap.session_id, "s1")
+        self.assertEqual(snap.mood, "委屈")
+        self.assertEqual(snap.mood_intensity, 0.8)
+        self.assertEqual(snap.unanswered_count, 2)
+        self.assertEqual(snap.last_user_at, 111.0)
+        entry = snap.active_context.entries[0]
+        self.assertEqual(entry.remaining_ttl, 3)
+        self.assertEqual(round(entry.strength, 2), 0.8)
+        self.assertEqual(entry.activated_at_turn, 1)
 
 
 if __name__ == "__main__":

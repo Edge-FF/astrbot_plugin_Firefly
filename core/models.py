@@ -236,6 +236,17 @@ class SessionState:
             proactive_day=str(data.get("proactive_day", "")),
         )
 
+    def snapshot(self) -> SessionState:
+        """返回一份独立快照，用于需要保留「变更前状态」的场景。
+
+        复用 to_dict()/from_dict() 而非逐字段复制，使字段清单在全仓只有一处，
+        避免新增字段时漏拷（历史上这里是第三份重复的字段列表）。
+
+        Returns:
+            与当前状态等值、但不共享任何可变对象的新实例。
+        """
+        return SessionState.from_dict(self.to_dict())
+
     def is_stale(self, now: float, decay_hours: float) -> bool:
         """判断状态是否已超时（超过 decay_hours 无互动则视为陈旧）。
 
