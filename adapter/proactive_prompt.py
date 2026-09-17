@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from ..core.proactive import (
+from ..core.proactive.policy import (
     INTENT_CARE,
     INTENT_CHECK,
     INTENT_CONTINUE,
@@ -69,7 +69,7 @@ def build_intent_prompt(intent: str, topics: list[str], now: float) -> str:
     """构建某意图对应的用户侧提示词。
 
     Args:
-        intent: 意图标识（见 core.proactive 的 INTENT_*）。
+        intent: 意图标识（见 core.proactive.policy 的 INTENT_*）。
         topics: 最近话题列表。
         now: 当前时间戳。
 

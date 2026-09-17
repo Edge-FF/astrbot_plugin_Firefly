@@ -12,10 +12,10 @@ from pathlib import Path
 from typing import Any
 
 from astrbot_plugin_Firefly.adapter.role_api import RoleApi
+from astrbot_plugin_Firefly.core.cognition.state import StateStore
+from astrbot_plugin_Firefly.core.materials.registry import MaterialRegistry
+from astrbot_plugin_Firefly.core.materials.role_store import RoleStore
 from astrbot_plugin_Firefly.core.models import ActivatedEntry
-from astrbot_plugin_Firefly.core.registry import MaterialRegistry
-from astrbot_plugin_Firefly.core.role_store import RoleStore
-from astrbot_plugin_Firefly.core.state import StateStore
 
 
 def _write(root: Path, rel: str, text: str) -> None:

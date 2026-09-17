@@ -12,7 +12,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from .parsers import coerce_bool, coerce_float, coerce_int
+from .materials.parsers import coerce_bool, coerce_float, coerce_int
 
 
 @dataclass(frozen=True)

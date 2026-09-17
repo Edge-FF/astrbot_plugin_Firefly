@@ -1,4 +1,4 @@
-"""core.router 的单元测试（KeywordRouter + LLMRouter）。"""
+"""core.routing.router 的单元测试（KeywordRouter + LLMRouter）。"""
 
 from __future__ import annotations
 
@@ -8,12 +8,12 @@ import unittest
 from pathlib import Path
 from typing import Any
 
+from astrbot_plugin_Firefly.core.materials.registry import MaterialRegistry
 from astrbot_plugin_Firefly.core.models import (
     MaterialEntry,
     SessionState,
 )
-from astrbot_plugin_Firefly.core.registry import MaterialRegistry
-from astrbot_plugin_Firefly.core.router import KeywordRouter, LLMRouter
+from astrbot_plugin_Firefly.core.routing.router import KeywordRouter, LLMRouter
 
 
 def _write_entry(role_dir: Path, rel_path: str, frontmatter: str, body: str) -> None:

@@ -12,9 +12,9 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from .affect import AffectEngine
-from .config import ProactiveConfig
-from .models import SessionState
+from ..cognition.affect import AffectEngine
+from ..config import ProactiveConfig
+from ..models import SessionState
 
 UNANSWERED_BOOST = 1.5  # 每次未回复带来的冲动加值
 

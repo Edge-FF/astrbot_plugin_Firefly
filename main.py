@@ -24,15 +24,15 @@ from .adapter.commands import FireflyCommandMixin
 from .adapter.debug_recorder import DebugRecorder
 from .adapter.injector import CognitiveShellInjector
 from .adapter.proactive_runner import ProactiveRunner
-from .core.affect import AffectEngine
-from .core.assembly import ShellAssembly
-from .core.builder import ShellBuilder
+from .core.cognition.affect import AffectEngine
+from .core.cognition.context_manager import ActiveContextManager
+from .core.cognition.state import StateStore
 from .core.config import ProactiveConfig, ShellConfig
-from .core.context_manager import ActiveContextManager
-from .core.proactive import ProactivePolicy
-from .core.registry import MaterialRegistry
-from .core.router import ContextRouter, FallbackRouter, KeywordRouter, LLMRouter
-from .core.state import StateStore
+from .core.materials.registry import MaterialRegistry
+from .core.proactive.policy import ProactivePolicy
+from .core.routing.router import ContextRouter, FallbackRouter, KeywordRouter, LLMRouter
+from .core.shell.assembly import ShellAssembly
+from .core.shell.builder import ShellBuilder
 
 
 @dataclass
@@ -362,7 +362,7 @@ class FireflyPlugin(FireflyCommandMixin, star.Star):
             return
 
         from .adapter.role_api import RoleApi
-        from .core.role_store import RoleStore
+        from .core.materials.role_store import RoleStore
 
         role_api = RoleApi(
             context=self.context,

@@ -1,4 +1,4 @@
-"""core.state（动态状态存储）的单元测试 v0.2。"""
+"""core.cognition.state（动态状态存储）的单元测试 v0.2。"""
 
 from __future__ import annotations
 
@@ -9,12 +9,12 @@ import unittest
 from pathlib import Path
 from unittest import IsolatedAsyncioTestCase
 
+from astrbot_plugin_Firefly.core.cognition.state import StateStore
 from astrbot_plugin_Firefly.core.models import (
     ActivatedEntry,
     ActiveContext,
     SessionState,
 )
-from astrbot_plugin_Firefly.core.state import StateStore
 
 
 class TestStateStore(IsolatedAsyncioTestCase):

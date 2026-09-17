@@ -17,9 +17,9 @@ from .api.http import HttpHelpers
 from .debug_api import error, ok
 
 if TYPE_CHECKING:
-    from ..core.registry import MaterialRegistry
-    from ..core.role_store import RoleStore
-    from ..core.state import StateStore
+    from ..core.cognition.state import StateStore
+    from ..core.materials.registry import MaterialRegistry
+    from ..core.materials.role_store import RoleStore
 
 
 class RoleApi(HttpHelpers):

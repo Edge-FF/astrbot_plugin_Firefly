@@ -12,14 +12,14 @@ from unittest import IsolatedAsyncioTestCase
 
 from astrbot_plugin_Firefly.adapter.debug_recorder import DebugRecorder
 from astrbot_plugin_Firefly.adapter.proactive_runner import ProactiveRunner
-from astrbot_plugin_Firefly.core.affect import AffectEngine
+from astrbot_plugin_Firefly.core.cognition.affect import AffectEngine
+from astrbot_plugin_Firefly.core.cognition.state import StateStore
 from astrbot_plugin_Firefly.core.config import ProactiveConfig, ShellConfig
 from astrbot_plugin_Firefly.core.models import (
     BuildResult,
     SessionState,
 )
-from astrbot_plugin_Firefly.core.proactive import ProactivePolicy
-from astrbot_plugin_Firefly.core.state import StateStore
+from astrbot_plugin_Firefly.core.proactive.policy import ProactivePolicy
 
 _HOUR = 3600.0
 

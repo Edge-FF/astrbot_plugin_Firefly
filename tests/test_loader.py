@@ -1,4 +1,4 @@
-"""core.parsers 与 core.registry 的单元测试。"""
+"""core.materials.parsers 与 core.materials.registry 的单元测试。"""
 
 from __future__ import annotations
 
@@ -8,14 +8,14 @@ from pathlib import Path
 from unittest import mock
 
 from astrbot_plugin_Firefly.core import consts
-from astrbot_plugin_Firefly.core.parsers import (
+from astrbot_plugin_Firefly.core.materials.parsers import (
     coerce_int,
     coerce_str_list,
     parse_frontmatter,
     strip_html_comments,
 )
 from astrbot_plugin_Firefly.core.models import MaterialEntry
-from astrbot_plugin_Firefly.core.registry import MaterialRegistry
+from astrbot_plugin_Firefly.core.materials.registry import MaterialRegistry
 
 
 def _write(role_dir: Path, rel: str, text: str) -> None:

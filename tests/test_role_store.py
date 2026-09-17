@@ -1,4 +1,4 @@
-"""core.role_store 的单元测试：路径边界、目录树、单文件读取。
+"""core.materials.role_store 的单元测试：路径边界、目录树、单文件读取。
 
 对账用例（test_matches_registry_metadata）用于锁定"树元数据 == registry 索引"，
 防止两侧推断规则漂移。
@@ -13,8 +13,8 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from astrbot_plugin_Firefly.core.registry import MaterialRegistry
-from astrbot_plugin_Firefly.core.role_store import (
+from astrbot_plugin_Firefly.core.materials.registry import MaterialRegistry
+from astrbot_plugin_Firefly.core.materials.role_store import (
     MAX_DOCUMENT_BYTES,
     MAX_PATH_DEPTH,
     RoleStore,
@@ -359,7 +359,7 @@ class TestWritePath(unittest.TestCase):
         before = self.store.read_document("技能/原.md")
 
         with mock.patch(
-            "astrbot_plugin_Firefly.core.role_store.os.replace",
+            "astrbot_plugin_Firefly.core.materials.role_store.os.replace",
             side_effect=OSError("boom"),
         ):
             with self.assertRaises(RoleStoreError):

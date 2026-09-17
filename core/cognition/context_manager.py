@@ -5,8 +5,8 @@
 
 from __future__ import annotations
 
-from .models import ActivatedEntry, ActiveContext, RouteResult
-from .registry import MaterialRegistry
+from ..materials.registry import MaterialRegistry
+from ..models import ActivatedEntry, ActiveContext, RouteResult
 
 
 class ActiveContextManager:

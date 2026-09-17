@@ -6,11 +6,11 @@
 
 from __future__ import annotations
 
-from . import consts
+from .. import consts
+from ..cognition.context_manager import ActiveContextManager
+from ..materials.registry import MaterialRegistry
+from ..models import ActivatedEntry, BuildResult, MaterialEntry, SessionState
 from .builder import ShellBuilder
-from .context_manager import ActiveContextManager
-from .models import ActivatedEntry, BuildResult, MaterialEntry, SessionState
-from .registry import MaterialRegistry
 
 
 class ShellAssembly:

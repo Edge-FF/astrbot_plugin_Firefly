@@ -1,6 +1,6 @@
-"""core.updaters（会话状态辅助）的单元测试。
+"""core.cognition.updaters（会话状态辅助）的单元测试。
 
-心情演化已迁移到 core.affect（见 test_affect.py），
+心情演化已迁移到 core.cognition.affect（见 test_affect.py），
 本文件只覆盖保留在此的纯状态工具：话题队列与话题提取。
 """
 
@@ -8,8 +8,11 @@ from __future__ import annotations
 
 import unittest
 
+from astrbot_plugin_Firefly.core.cognition.updaters import (
+    extract_topic,
+    update_recent_topics,
+)
 from astrbot_plugin_Firefly.core.models import SessionState
-from astrbot_plugin_Firefly.core.updaters import extract_topic, update_recent_topics
 
 
 class TestTopicHelpers(unittest.TestCase):

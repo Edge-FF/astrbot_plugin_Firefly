@@ -9,7 +9,7 @@ registry 中——否则写入侧会反向依赖索引侧。
 
 from __future__ import annotations
 
-from . import consts
+from .. import consts
 
 
 def infer_tier_kind(rel_path: str) -> tuple[int, str]:

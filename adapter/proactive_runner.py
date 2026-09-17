@@ -1,7 +1,7 @@
 """主动消息执行器：后台循环 + 生成 + 发送 + 回写。
 
 设计约束：
-- 决策在 core.proactive（纯函数），本层只负责 IO 与框架调用。
+- 决策在 core.proactive.policy（纯函数），本层只负责 IO 与框架调用。
 - 后台循环与正常对话链路隔离：任何异常都不得外溢；单会话失败不影响其它会话。
 - 不跨 LLM 调用持有 Store 锁（Store 自身的 get/set 是短操作）。
 - 生成期间用户插话 → 丢弃本次结果；发送失败 → 不计数、不推进 last_proactive_at。
@@ -16,7 +16,7 @@ from collections.abc import Awaitable, Callable
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
-from ..core.affect import (
+from ..core.cognition.affect import (
     EVENT_PROACTIVE_SENT,
     EVENT_PROACTIVE_UNANSWERED,
     EVENT_SILENCE,
@@ -25,13 +25,13 @@ from ..core.affect import (
 )
 from ..core.config import ProactiveConfig, ShellConfig
 from ..core.models import SessionState
-from ..core.proactive import ProactivePolicy
+from ..core.proactive.policy import ProactivePolicy
 from ..core.records import ProactiveRecord
 from .proactive_prompt import build_intent_prompt
 
 if TYPE_CHECKING:
-    from ..core.assembly import ShellAssembly
-    from ..core.state import StateStore
+    from ..core.cognition.state import StateStore
+    from ..core.shell.assembly import ShellAssembly
 
 
 class ProactiveRunner:

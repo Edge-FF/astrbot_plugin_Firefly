@@ -25,7 +25,7 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
-from . import consts
+from .. import consts
 from .parsers import (
     coerce_int,
     coerce_str_list,

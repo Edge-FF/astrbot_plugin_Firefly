@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 
-from .models import SessionState
+from ..models import SessionState
 
 # ============================================================================
 # 常量

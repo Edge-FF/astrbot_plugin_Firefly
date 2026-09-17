@@ -12,8 +12,8 @@ from __future__ import annotations
 from collections import OrderedDict
 from pathlib import Path
 
-from . import consts
-from .models import LoadReport, MaterialEntry
+from .. import consts
+from ..models import LoadReport, MaterialEntry
 from .parsers import coerce_int, coerce_str_list, parse_frontmatter, strip_html_comments
 from .tier_rules import infer_tier_kind
 

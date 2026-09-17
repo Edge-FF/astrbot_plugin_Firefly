@@ -1,13 +1,13 @@
-"""core.proactive（主动消息决策层）的单元测试。"""
+"""core.proactive.policy（主动消息决策层）的单元测试。"""
 
 from __future__ import annotations
 
 import unittest
 
-from astrbot_plugin_Firefly.core.affect import AffectEngine
+from astrbot_plugin_Firefly.core.cognition.affect import AffectEngine
 from astrbot_plugin_Firefly.core.config import ProactiveConfig
 from astrbot_plugin_Firefly.core.models import SessionState
-from astrbot_plugin_Firefly.core.proactive import (
+from astrbot_plugin_Firefly.core.proactive.policy import (
     INTENT_CHECK,
     INTENT_MISS,
     INTENT_SHARE,

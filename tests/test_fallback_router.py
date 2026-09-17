@@ -15,7 +15,7 @@ from astrbot_plugin_Firefly.core.models import (
     RouteSignals,
     SessionState,
 )
-from astrbot_plugin_Firefly.core.router import FallbackRouter
+from astrbot_plugin_Firefly.core.routing.router import FallbackRouter
 
 # 路由器替身不使用 registry，传 None 即可
 _NO_REGISTRY = None

@@ -1,4 +1,4 @@
-"""core.affect（情绪引擎）的单元测试。
+"""core.cognition.affect（情绪引擎）的单元测试。
 
 重点验证：用户信号 → 事件 → 她的心情（反应），而不是直接照抄用户情绪。
 """
@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import unittest
 
-from astrbot_plugin_Firefly.core.affect import (
+from astrbot_plugin_Firefly.core.cognition.affect import (
     BASELINE_INTENSITY,
     BASELINE_MOOD,
     EVENT_AFFECTION,

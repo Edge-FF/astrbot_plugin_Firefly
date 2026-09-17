@@ -12,7 +12,7 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-from .models import SessionState
+from ..models import SessionState
 
 _JSON_OPTS = {"ensure_ascii": False, "indent": 2}
 

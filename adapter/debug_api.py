@@ -16,8 +16,8 @@ from .api.http import HttpHelpers
 from .dto import injection_to_api_dict, proactive_to_api_dict
 
 if TYPE_CHECKING:
-    from ..core.registry import MaterialRegistry
-    from ..core.state import StateStore
+    from ..core.cognition.state import StateStore
+    from ..core.materials.registry import MaterialRegistry
     from .debug_recorder import DebugRecorder
 
 

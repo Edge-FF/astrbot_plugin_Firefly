@@ -22,15 +22,15 @@ from unittest import IsolatedAsyncioTestCase
 
 from astrbot_plugin_Firefly.adapter.debug_recorder import DebugRecorder
 from astrbot_plugin_Firefly.adapter.injector import CognitiveShellInjector
-from astrbot_plugin_Firefly.core.affect import AffectEngine
-from astrbot_plugin_Firefly.core.assembly import ShellAssembly
-from astrbot_plugin_Firefly.core.builder import ShellBuilder
+from astrbot_plugin_Firefly.core.cognition.affect import AffectEngine
+from astrbot_plugin_Firefly.core.cognition.context_manager import ActiveContextManager
+from astrbot_plugin_Firefly.core.cognition.state import StateStore
 from astrbot_plugin_Firefly.core.config import ShellConfig
-from astrbot_plugin_Firefly.core.context_manager import ActiveContextManager
+from astrbot_plugin_Firefly.core.materials.registry import MaterialRegistry
 from astrbot_plugin_Firefly.core.models import SessionState
-from astrbot_plugin_Firefly.core.registry import MaterialRegistry
-from astrbot_plugin_Firefly.core.router import KeywordRouter
-from astrbot_plugin_Firefly.core.state import StateStore
+from astrbot_plugin_Firefly.core.routing.router import KeywordRouter
+from astrbot_plugin_Firefly.core.shell.assembly import ShellAssembly
+from astrbot_plugin_Firefly.core.shell.builder import ShellBuilder
 
 from astrbot.api.provider import LLMResponse
 from astrbot.core.agent.message import Message

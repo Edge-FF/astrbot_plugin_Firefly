@@ -9,8 +9,8 @@ from __future__ import annotations
 
 import re
 
-from . import consts
-from .models import SessionState
+from .. import consts
+from ..models import SessionState
 
 _PUNCT_RE = re.compile(r"[\s\u3000!?.,;:。，；：、！？…~～\x22'‘’“”（）()【】\[\]]+")
 

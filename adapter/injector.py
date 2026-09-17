@@ -27,7 +27,8 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 from ..core import consts
-from ..core.affect import EVENT_REUNION, AffectEngine, AffectEvent
+from ..core.cognition.affect import EVENT_REUNION, AffectEngine, AffectEvent
+from ..core.cognition.updaters import update_recent_topics
 from ..core.config import ShellConfig
 from ..core.models import (
     BuildResult,
@@ -36,18 +37,17 @@ from ..core.models import (
     SessionState,
 )
 from ..core.records import InjectionRecord
-from ..core.updaters import update_recent_topics
 from . import astrbot_compat
 
 if TYPE_CHECKING:
     from astrbot.api.event import AstrMessageEvent
     from astrbot.api.provider import LLMResponse, ProviderRequest
 
-    from ..core.assembly import ShellAssembly
-    from ..core.context_manager import ActiveContextManager
-    from ..core.registry import MaterialRegistry
-    from ..core.router import ContextRouter
-    from ..core.state import StateStore
+    from ..core.cognition.context_manager import ActiveContextManager
+    from ..core.cognition.state import StateStore
+    from ..core.materials.registry import MaterialRegistry
+    from ..core.routing.router import ContextRouter
+    from ..core.shell.assembly import ShellAssembly
     from .astrbot_compat import ContextWrapper
     from .debug_recorder import DebugRecorder
 

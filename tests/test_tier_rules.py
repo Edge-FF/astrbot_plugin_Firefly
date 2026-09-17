@@ -1,4 +1,4 @@
-"""core.tier_rules（tier/kind 推断规则）的单元测试（P1-3）。
+"""core.materials.tier_rules（tier/kind 推断规则）的单元测试（P1-3）。
 
 该规则同时被 registry（索引侧）与 role_store（写入侧）使用，因此这里是它的
 直接契约测试：锁定完整规则表与优先级，防止两侧行为各自漂移。
@@ -12,7 +12,7 @@ from __future__ import annotations
 import unittest
 
 from astrbot_plugin_Firefly.core import consts
-from astrbot_plugin_Firefly.core.tier_rules import infer_tier_kind
+from astrbot_plugin_Firefly.core.materials.tier_rules import infer_tier_kind
 
 
 class TestDirectoryRules(unittest.TestCase):

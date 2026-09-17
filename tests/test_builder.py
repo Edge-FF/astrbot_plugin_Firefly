@@ -1,15 +1,15 @@
-"""core.builder（认知外壳组装）的单元测试。"""
+"""core.shell.builder（认知外壳组装）的单元测试。"""
 
 from __future__ import annotations
 
 import unittest
 
-from astrbot_plugin_Firefly.core.builder import ShellBuilder
 from astrbot_plugin_Firefly.core.models import (
     ActivatedEntry,
     MaterialEntry,
     SessionState,
 )
+from astrbot_plugin_Firefly.core.shell.builder import ShellBuilder
 
 
 def _entry(**kwargs) -> MaterialEntry:

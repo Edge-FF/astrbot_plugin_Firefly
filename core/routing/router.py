@@ -16,14 +16,14 @@ import time
 from collections.abc import Awaitable, Callable
 from typing import Any
 
-from . import consts
-from .models import (
+from .. import consts
+from ..materials.registry import MaterialRegistry
+from ..models import (
     MaterialEntry,
     RouteResult,
     RouteSignals,
     SessionState,
 )
-from .registry import MaterialRegistry
 
 # LLM 路由的系统提示（固定，约 50 token）
 _ROUTER_SYSTEM_PROMPT = (
