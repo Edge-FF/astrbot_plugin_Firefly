@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Any
 from ..core import consts
 from ..core.models import SessionState
 from .api.http import HttpHelpers
+from .dto import injection_to_api_dict, proactive_to_api_dict
 
 if TYPE_CHECKING:
     from ..core.registry import MaterialRegistry
@@ -212,7 +213,7 @@ class DebugApi(HttpHelpers):
             records = self._recorder.get_proactive_recent(sid, limit, offset)
             return ok(
                 {
-                    "records": [r.to_api_dict() for r in records],
+                    "records": [proactive_to_api_dict(r) for r in records],
                     "total": self._recorder.count_proactive(sid),
                 }
             )
@@ -391,7 +392,7 @@ class DebugApi(HttpHelpers):
             )
             items = []
             for r in records:
-                d = r.to_api_dict()
+                d = injection_to_api_dict(r)
                 d.pop("injection_xml", None)
                 items.append(d)
             return ok(
@@ -431,7 +432,7 @@ class DebugApi(HttpHelpers):
             r = self._recorder.get_by_id(rid)
             if r is None:
                 return error(f"记录不存在：{rid}")
-            return ok(r.to_api_dict())
+            return ok(injection_to_api_dict(r))
         except Exception as e:
             return error(str(e))
 

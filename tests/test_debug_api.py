@@ -13,7 +13,8 @@ from typing import Any
 
 from astrbot_plugin_Firefly.adapter.debug_api import DebugApi
 from astrbot_plugin_Firefly.adapter.debug_recorder import DebugRecorder
-from astrbot_plugin_Firefly.core.models import InjectionRecord, SessionState
+from astrbot_plugin_Firefly.core.models import SessionState
+from astrbot_plugin_Firefly.core.records import InjectionRecord
 from astrbot_plugin_Firefly.core.state import StateStore
 
 

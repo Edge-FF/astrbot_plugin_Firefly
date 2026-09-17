@@ -10,7 +10,8 @@ import json
 from collections import deque
 from pathlib import Path
 
-from ..core.models import InjectionRecord, ProactiveRecord
+from ..core.records import InjectionRecord, ProactiveRecord
+from .dto import injection_to_api_dict
 
 
 class DebugRecorder:
@@ -53,7 +54,10 @@ class DebugRecorder:
             try:
                 self._log_path.parent.mkdir(parents=True, exist_ok=True)
                 with open(self._log_path, "a", encoding="utf-8") as fh:
-                    fh.write(json.dumps(rec.to_api_dict(), ensure_ascii=False) + "\n")
+                    fh.write(
+                        json.dumps(injection_to_api_dict(rec), ensure_ascii=False)
+                        + "\n"
+                    )
             except OSError:
                 pass
 

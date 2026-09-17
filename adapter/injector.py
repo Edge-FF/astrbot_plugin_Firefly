@@ -31,11 +31,11 @@ from ..core.affect import EVENT_REUNION, AffectEngine, AffectEvent
 from ..core.config import ShellConfig
 from ..core.models import (
     BuildResult,
-    InjectionRecord,
     RouteResult,
     RouteSignals,
     SessionState,
 )
+from ..core.records import InjectionRecord
 from ..core.updaters import update_recent_topics
 from . import astrbot_compat
 

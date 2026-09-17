@@ -24,8 +24,9 @@ from ..core.affect import (
     AffectEvent,
 )
 from ..core.config import ProactiveConfig, ShellConfig
-from ..core.models import ProactiveRecord, SessionState
+from ..core.models import SessionState
 from ..core.proactive import ProactivePolicy
+from ..core.records import ProactiveRecord
 from .proactive_prompt import build_intent_prompt
 
 if TYPE_CHECKING:
