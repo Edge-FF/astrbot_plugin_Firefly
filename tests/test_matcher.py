@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import unittest
 from pathlib import Path
 from typing import Any
@@ -147,6 +148,34 @@ class TestLLMRouter(unittest.TestCase):
         """验证非法 JSON 返回空结果（安全降级）。"""
         result = LLMRouter._parse_response("not json", _make_fake_registry([]))
         self.assertEqual(result.needed_ids, [])
+
+    def test_generate_failure_is_logged_and_returns_none(self):
+        """P1-6 S2：LLM 调用异常必须留痕，且保持返回 None 的降级契约。"""
+        logger = logging.getLogger("test_llm_router_failure")
+
+        async def _boom(system_prompt: str, user_prompt: str) -> str:
+            """模拟上游 LLM 不可用。"""
+            raise RuntimeError("上游不可用")
+
+        router = LLMRouter(
+            llm_generate=_boom,
+            timeout=3.0,
+            cache_enabled=False,
+            logger=logger,
+        )
+
+        with self.assertLogs(logger, level="DEBUG") as captured:
+            result = _run(
+                router.route(
+                    "测试", SessionState(session_id="s1"), _make_empty_registry()
+                )
+            )
+
+        self.assertIsNone(result)
+        self.assertTrue(
+            any("LLM 路由失败" in message for message in captured.output),
+            f"未记录路由失败：{captured.output}",
+        )
 
 
 def _make_empty_registry() -> MaterialRegistry:

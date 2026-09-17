@@ -103,6 +103,7 @@ class FireflyPlugin(FireflyCommandMixin, star.Star):
                 llm_generate=llm_generate_fn,
                 timeout=cfg.router_llm_timeout,
                 cache_enabled=cfg.router_cache_enabled,
+                logger=self.logger,
             )
 
         keyword_router = KeywordRouter(max_entries=cfg.max_on_demand)

@@ -14,6 +14,7 @@ import json
 import re
 import time
 from collections.abc import Awaitable, Callable
+from typing import Any
 
 from . import consts
 from .models import (
@@ -73,6 +74,7 @@ class LLMRouter:
         llm_generate: Callable[[str, str], Awaitable[str]] | None = None,
         timeout: float = 3.0,
         cache_enabled: bool = True,
+        logger: Any = None,
     ) -> None:
         """初始化 LLM 路由。
 
@@ -80,10 +82,12 @@ class LLMRouter:
             llm_generate: async (system_prompt, user_prompt) -> str 生成函数。
             timeout: LLM 调用超时秒数。
             cache_enabled: 是否启用路由结果缓存。
+            logger: 可选的日志记录器；路由失败时用于留痕。
         """
         self._llm_generate = llm_generate
         self._timeout = timeout
         self._cache_enabled = cache_enabled
+        self._logger = logger
         self._cache: dict[str, tuple[float, RouteResult]] = {}
 
     async def route(
@@ -112,7 +116,12 @@ class LLMRouter:
             if self._cache_enabled:
                 self._cache[cache_key] = (time.time(), result)
             return result
-        except (TimeoutError, asyncio.TimeoutError, Exception):
+        except Exception as exc:
+            # 任何失败（超时/上游异常）都降级到关键词路由，但必须留痕：
+            # 否则「为什么这轮没命中资料」无从排查。
+            # CancelledError 继承自 BaseException，不会被这里吞掉。
+            if self._logger is not None:
+                self._logger.debug(f"[认知外壳] LLM 路由失败，本次降级：{exc!r}")
             return None
 
     def _build_prompt(
