@@ -132,10 +132,10 @@ ruff format --check core adapter main.py tests
 
 ## 3. 隐患与耦合清单
 
-> **修复进度**：**H1 / H2 / H3 / C1 / C2 / C3 / C4 / C5、S1 / S2 / S3 / S4 已在 P1–P2 修复**
-> （P1 见 §5「P1 执行结果」，C5/S6 见「P2 执行结果」；**B1** 已由 P2 解决，`models.py` 704 → 308 行）。
-> 仍待处理：**C6**（P5-1）、**M1 / M2**（随 §7.1 决策）、**B2–B6**（体量，P3–P4）、
-> **X1 / X2 / X3 / X4**（附带发现，另行处理）。
+> **修复进度**：**H1 / H2 / H3 / C1 / C2 / C3 / C4 / C5、S1 / S2 / S3 / S4 已在 P1–P2 修复**；
+> **B1–B5 已由 P2 与 P3 解决**（`models.py` 704 → 308 行；`core/` 已按子域分包，各文件职责单一）。
+> 仍待处理：**C6**（P5-1）、**M1 / M2**（随 §7.1 决策）、**B6**（`role_api.py`，当前无需处理）、
+> **X1–X6**（附带发现，另行处理；其中 X5/X6 为 P3 期间新增，见 §3.5）。
 > 下表保留原始记录，作为问题来源与修复依据。
 
 ### 3.1 P0 — 会产生错误结果的缺陷
@@ -221,6 +221,8 @@ debug_recorder.py:56        ← 落盘 jsonl
 | **X2** | LLM 路由缓存无上限 | `core/router.py:87,180-188` | 缓存仅在命中时检查 60s TTL，过期条目不被主动清理。短时间高并发下会累积 |
 | **X3** | `_pending_signals` 按会话累积 | `adapter/injector.py:94` | 请求钩子写入、响应钩子消费。若响应钩子始终不触发，条目上限为会话数。影响很小，但无清理机制 |
 | **X4** | `tests/` 存在 11 处既有 lint 债，且默认 ruff 命令完全看不到 | §2.3 | 由 AstrBot 根 `pyproject.toml` 的 `exclude = [..., "tests"]` 导致。见 §7.4 |
+| **X5** | 局部别名 `core = self._core` 与 `core` 包同名 | `adapter/commands.py:28,67,87,113,128` | 同一文件里 `core.registry` 是**属性访问**，而别处 `core.registry` 是**模块路径**，语义完全相反。P3 的改写脚本据此产出过误改（§5「P3 执行结果」）。建议把局部别名改为 `firefly` 或直接用 `self._core` |
+| **X6** | `adapter/commands.py` 无任何测试覆盖 | `tests/` | P3 中该文件被脚本改坏（`core.proactive` → `core.proactive.policy`），而**全量 210 个测试仍全部通过**。该文件的命令处理逻辑目前只靠真实环境人工验证，与「P1/P2 每个行为都有测试」的标准不一致 |
 
 > **X1 是真实的可扩展性风险**，但修复它会改变数据持久化语义（防抖/批量写引入崩溃丢数据窗口）。
 > 因此**不纳入本次重构**，另立任务评估。
@@ -233,16 +235,16 @@ debug_recorder.py:56        ← 落盘 jsonl
 
 ```
 core/
-├── __init__.py              # 仅 docstring
+├── __init__.py              # 仅 docstring（含目录说明）
 ├── consts.py                # 领域常量（叶子）
 ├── models.py                # 领域实体（叶子）
 ├── config.py                # 运行配置 + 解析（叶子）          ← P2 新建
 ├── records.py               # 调试记录数据（叶子）              ← P2 新建
-├── tier_rules.py            # tier/kind 推断规则（叶子）        ← P1 新建
 │
-├── materials/               # 支撑域：资料文件、分层规则、缓存
-│   ├── registry.py
+├── materials/               # 支撑域：资料文件、层级规则、索引、读写
+│   ├── tier_rules.py        # tier/kind 推断规则（叶子）        ← P1 新建，P3 迁入本包
 │   ├── parsers.py
+│   ├── registry.py
 │   └── role_store.py
 ├── cognition/               # 支撑域：心情、话题、激活惯性
 │   ├── state.py
@@ -250,14 +252,18 @@ core/
 │   ├── context_manager.py
 │   └── updaters.py
 ├── routing/                 # 支撑域：一句话 → 命中资料
-│   ├── router.py
-│   └── fallback.py          # FallbackRouter                 ← P1 从 main.py 迁移
+│   └── router.py            # 含 FallbackRouter（P1-5 自 main.py 迁入）
 ├── shell/                   # 支撑域：预算内拼装文本
 │   ├── builder.py
 │   └── assembly.py
 └── proactive/               # 业务域：主动消息策略
     └── policy.py            # 原 proactive.py
 ```
+
+> 实际落点与初版设计有两处差异（见 §5「P3 执行结果」）：
+> `tier_rules.py` 放在 `materials/` 而非 `core/` 顶层（它只被 materials 内两个模块使用，
+> 放顶层会伪装成「全层共用」的基础模块）；`routing/` 只有 `router.py`
+> （P1-5 已把 `FallbackRouter` 放进 `router.py`，不再单列 `fallback.py`）。
 
 **唯一硬规则：子包之间依赖无环，且不允许 `core/**` 出现 `astrbot` import。**
 `__init__.py` 只写 docstring，**禁止 re-export 全体**（会造出新的隐式耦合节点）。
@@ -574,6 +580,74 @@ P1–P6 每新增一个断言，都应自问「把被测代码改坏，这条断
 - 架构测试的三条断言全部启用且通过。
 - **一次 commit 完成**，便于整体回滚。
 
+#### ✅ P3 执行结果（已完成）
+
+| 项 | 结果 |
+|---|---|
+| 提交 | `1e6b762 refactor: split core into domain subpackages`（40 个文件，一次提交便于整体回滚） |
+| 移动 | 12 个模块，git 识别为改名，相似度 **91%–100%**（`parsers.py` 100%，无需改动） |
+| 新增 | 5 个子包 `__init__.py`（仅 docstring）+ 更新 `core/__init__.py` 为目录说明 |
+| 测试 | `Ran 210 tests — OK`（数量不变，锚点 3 条未修改即通过） |
+| lint / format | `core` / `adapter` / `main.py` 全部通过；`tests/` 债仍为 **11 lint + 8 格式文件**（与 P1/P2 基线同集） |
+
+**最终依赖图（实测，无环）**
+
+```
+consts, models, materials.parsers           -> []
+config                                      -> [materials.parsers]
+records                                     -> [models]
+materials.tier_rules                        -> [consts]
+materials.registry                          -> [consts, models, materials.parsers, materials.tier_rules]
+materials.role_store                        -> [consts, materials.parsers, materials.tier_rules]
+cognition.state / cognition.affect          -> [models]
+cognition.updaters                          -> [consts, models]
+cognition.context_manager                   -> [models, materials.registry]
+routing.router                              -> [consts, models, materials.registry]
+shell.builder                               -> [consts, models]
+shell.assembly                              -> [consts, models, materials.registry, cognition.context_manager, shell.builder]
+proactive.policy                            -> [models, config, cognition.affect]
+```
+
+要点：`registry` 与 `role_store` 现在是**对等节点**（均只依赖 `consts` / `parsers` / `tier_rules`），
+P1-3 修复的反向依赖在分包后依然成立；所有边都朝 `consts` / `models` 收敛。
+
+#### P3 的核心验证手段：AST 等价性比对
+
+分包是纯机械改动，因此除跑测试外，还做了**逐文件 AST 比对**：对 HEAD 与当前版本的每个文件，
+剥离全部 import 语句与 docstring 后比较 AST。结果：
+
+> 比对 50 个文件，**唯一**的非导入/非 docstring 差异是 `tests/test_role_store.py` 中一个
+> `mock.patch` 目标字符串（`"...core.role_store.os.replace"` → `"...core.materials.role_store.os.replace"`），
+> 这是移动本身要求改的。其余全部为零差异。
+
+这比"测试通过"强得多：它证明了分包没有夹带任何逻辑变更，包括**测试覆盖不到的代码**。
+
+#### P3 的偏离与一次真实误改（值得记录）
+
+| 项 | 计划 | 实际 | 原因 |
+|---|---|---|---|
+| `tier_rules.py` 位置 | 留在 `core/` 顶层 | 迁入 `core/materials/` | 它只被 `materials` 内的 `registry` / `role_store` 使用；放在顶层会伪装成「全层共用」的基础模块，与职责边界不符 |
+| `routing/fallback.py` | 单列 | 不存在（`FallbackRouter` 在 `router.py`） | P1-5 的既有偏离延续至此 |
+| import 迁移方式 | 手写/一次性 | 脚本改写 + 逐文件核对 | 改动面太大，手写易漏；脚本带区间校验与残留断言 |
+
+**⚠️ 脚本改写引入过一次真实误改，且未被测试发现**
+
+`adapter/commands.py` 中存在局部别名 `core = self._core`（5 处），因此 `core.proactive` 是
+**对象属性访问**而非模块路径。改写脚本把它错改成了 `core.proactive.policy`。
+该误改最终靠 AST 等价性比对发现——**没有任何测试覆盖 `adapter/commands.py`，全量测试当时仍是
+「210 passed」**。修复后已还原为 `core.proactive`。
+
+由此新增两条待办（见 §3.5 的 X5 / X6）：
+1. `commands.py` 的局部别名 `core` 与 `core` 包同名，可读性与改写安全性都差，建议改名；
+2. `adapter/commands.py` 完全没有测试，方法体内的错误不会被任何测试发现。
+
+**改写的两条经验（已固化进本文件的验证流程）**
+1. 对「模块路径」做文本替换时，**必须同时排除代码中的同名标识符**（本例的局部变量 `core`）。
+   可靠做法是替换后用 AST 比对确认「非导入代码零差异」，而不是只看测试是否通过。
+2. 用正则限定边界时要同时考虑三种合法形式：`from .X`、`from ..X`、`astrbot_plugin_Firefly.core.X`。
+   最初用 `(?<![.\w])` 会把后两种整体排除，导致改写静默失效（测试立即报错才发现）。
+
+
 > **P3 完成后必须做一次真实环境冒烟**（见 §6.5），确认 AstrBot 能正常加载插件。
 
 ---
@@ -842,8 +916,8 @@ P1–P6 每新增一个断言，都应自问「把被测代码改坏，这条断
 - [x] **P2-3** 统一 `coerce_*` 并接入配置告警；`fd7999f`
 - [x] **P2-4** import 迁移（随各子项完成）+ 自检（无 diff）
 - [x] **P2 冒烟** —— 锚点/护栏全通过 + DTO 黄金比对 + 逐字节搬运证明；真实 AstrBot 启动需人工执行
-- [ ] **P3** `core` 分包（一次完成）；commit（`refactor:`）
-- [ ] **P3 冒烟**（重点确认插件可加载）
+- [x] **P3** `core` 分包（一次完成）；`1e6b762`
+- [x] **P3 冒烟** —— 26 个子模块逐一导入成功 + 插件主模块导入成功 + 依赖图无环 + AST 等价性比对；真实 AstrBot 启动已由用户确认正常
 - [ ] **P4** `adapter/api/` 拆分；commit（`refactor:`）
 - [ ] **P4 冒烟**（重点确认面板路由）
 - [ ] **P5** 装配收敛；commit（`refactor:`）
