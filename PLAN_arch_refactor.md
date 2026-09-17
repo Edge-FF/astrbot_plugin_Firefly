@@ -132,10 +132,11 @@ ruff format --check core adapter main.py tests
 
 ## 3. 隐患与耦合清单
 
-> **修复进度**：**H1 / H2 / H3 / C1 / C2 / C3 / C4 / C5、S1 / S2 / S3 / S4 已在 P1–P2 修复**；
-> **B1–B5 已由 P2 与 P3 解决**（`models.py` 704 → 308 行；`core/` 已按子域分包，各文件职责单一）。
-> 仍待处理：**C6**（P5-1）、**M1 / M2**（随 §7.1 决策）、**B6**（`role_api.py`，当前无需处理）、
-> **X1–X6**（附带发现，另行处理；其中 X5/X6 为 P3 期间新增，见 §3.5）。
+> **修复进度**：**H1 / H2 / H3、C1–C5、S1–S4 已在 P1–P2 修复**；
+> **B1–B6 已由 P2–P4 解决**（`models.py` 704 → 308 行；`core/` 按子域分包；
+> `debug_api.py` 704 → 110 行并按资源拆分到 `adapter/api/`）。
+> 仍待处理：**C6**（P5-1）、**M1 / M2**（随 §7.1 决策）、
+> **X1–X6**（附带发现，另行处理；X5/X6 为 P3 期间新增，见 §3.5）。
 > 下表保留原始记录，作为问题来源与修复依据。
 
 ### 3.1 P0 — 会产生错误结果的缺陷
@@ -280,15 +281,20 @@ adapter/
 ├── proactive_runner.py      # 后台驱动循环
 ├── proactive_prompt.py
 ├── role_api.py              # 资料写路径（独立，职责不同于只读面板）
-└── api/                     # 调试面板 API                    ← P4 新建
-    ├── __init__.py          # register_all(context, deps) 唯一入口
-    ├── http.py              # _get_query / _get_json 共享实现
-    ├── sessions.py
-    ├── injections.py
-    ├── materials.py
-    ├── route.py
-    └── stats.py
+└── api/                     # 调试面板 API                    ← P4 建立
+    ├── __init__.py          # 仅 docstring
+    ├── http.py              # HttpHelpers 混入 + ok / error
+    ├── sessions.py          # 会话与状态路由（7 条）+ _state_to_dict
+    ├── injections.py        # 注入记录路由（3 条）
+    ├── materials.py         # 资料浏览/重载路由（3 条）
+    ├── route.py             # 路由测试 + 注入预览（2 条）
+    ├── stats.py             # 配置 / 注册表摘要 / 统计（3 条）
+    └── proactive.py         # 主动消息状态与手动触发（3 条）
 ```
+
+> `adapter/debug_api.py` 现在只是**组合壳**（110 行）：注入共享依赖、
+> 组合六个资源混入、按原顺序调用各模块的注册方法。
+> 新增一个面板 Tab = 新增一个资源模块 + 在壳里加一行调用。
 
 ### 4.3 新增业务功能的标准形状（模板）
 
@@ -676,6 +682,38 @@ P1-3 修复的反向依赖在分包后依然成立；所有边都朝 `consts` / 
 
 **P4 出口条件**：锚点测试不变；`test_debug_api.py`、`test_role_api.py` 全绿；面板 6 个 Tab 手工验证可用。
 
+#### ✅ P4 执行结果（已完成）
+
+| 项 | 结果 |
+|---|---|
+| 提交 | `e678418 refactor: split debug api handlers into per-resource modules` |
+| 结构 | `adapter/debug_api.py` **704 → 110 行**（组合壳）；新增 6 个资源模块 + 扩充 `api/http.py` |
+| 模块规模 | `sessions` 215 / `route` 139 / `materials` 117 / `stats` 99 / `proactive` 99 / `injections` 88 / `http` 76 行 |
+| 测试 | `Ran 210 tests — OK`（数量不变） |
+| lint / format | `core` / `adapter` / `main.py` 全部通过；`tests/` 债仍 **11 lint + 8 格式文件**（与基线同集） |
+| 护栏 | 架构 4 条 + 锚点 3 条全通过 |
+
+**P4 的两条强验证（都在重构前先取"黄金"，重构后逐项比对）**
+
+1. **路由表黄金比对**：重构前用替身上下文捕获 `register_web_api` 的全部调用
+   （路径 + HTTP 方法 + handler 名 + 顺序），重构后重放 ——
+   **21 条路由逐条一致，顺序也一致**。这是「面板路径与响应结构不变」的直接证据。
+2. **方法体逐字节等价**：对 HEAD 与当前版本提取每个方法的源码段（含装饰器）比对 ——
+   **22 个 handler 与 `ok` / `error` 全部逐字节一致**；`DebugApi.__init__` 同样逐字节一致。
+   唯一被重写的是 `register_routes`（改为委托给各资源模块），其效果由第 1 条验证。
+
+#### P4 对计划的三处偏离
+
+| 项 | 计划 | 实际 | 原因 |
+|---|---|---|---|
+| 主动消息 handler 归属 | 放进 `sessions.py` | 独立 `api/proactive.py` | 3 个 handler 自成一种资源（面板上也是独立 Tab）；独立成模块后**各资源按原顺序注册**即可与重构前的路由顺序完全一致，避免为此把注册方法拆成两段 |
+| `_state_to_dict` 归属 | 放进 `api/http.py` | 留在 `sessions.py`（`@staticmethod`） | 它是「会话状态 → 面板字典」的序列化，与 HTTP 请求解析无关；留在使用它的资源模块内可做到**零调用点改动** |
+| 注册入口 | `api/__init__.py` 提供 `register_all(context, deps)` | `DebugApi` 保留在 `adapter/debug_api.py` 作为组合壳 | `register_all` 仍需构造同一个持有 10 个依赖的对象，属多余间接层；保留 `DebugApi` 使 `main.py` 与测试的导入路径都不变，且 `api/__init__.py` 得以维持「仅 docstring」的既定约定 |
+
+> 计划表格中的「面板 6 个 Tab 手工验证」仍需人工执行一次（路由表已由黄金比对覆盖，
+> 前端渲染与响应字段未被自动化覆盖）。
+
+
 ---
 
 ### P5 — 装配收敛（行为等价）
@@ -918,8 +956,8 @@ P1-3 修复的反向依赖在分包后依然成立；所有边都朝 `consts` / 
 - [x] **P2 冒烟** —— 锚点/护栏全通过 + DTO 黄金比对 + 逐字节搬运证明；真实 AstrBot 启动需人工执行
 - [x] **P3** `core` 分包（一次完成）；`1e6b762`
 - [x] **P3 冒烟** —— 26 个子模块逐一导入成功 + 插件主模块导入成功 + 依赖图无环 + AST 等价性比对；真实 AstrBot 启动已由用户确认正常
-- [ ] **P4** `adapter/api/` 拆分；commit（`refactor:`）
-- [ ] **P4 冒烟**（重点确认面板路由）
+- [x] **P4** `adapter/api/` 拆分；`e678418`
+- [x] **P4 冒烟** —— 路由表黄金比对 21/21 一致 + 方法体逐字节等价 + 9 个子模块导入成功；面板 6 个 Tab 的人工验证待执行
 - [ ] **P5** 装配收敛；commit（`refactor:`）
 - [ ] **P5 冒烟**
 - [ ] **P6** 文档更新 + 全量检查；commit（`docs:`）
