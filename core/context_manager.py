@@ -41,11 +41,19 @@ class ActiveContextManager:
         - 已有条目续期
         - 保留惯性条目
         - 更新轮次计数
+
+        Args:
+            route_result: 本轮路由结果。
+            current: 当前激活上下文。
+            registry: 资料注册表（取条目以读取其 default_ttl，允许懒加载）。
+
+        Returns:
+            合并后的新激活上下文。
         """
         new_entries: list[ActivatedEntry] = []
 
         for entry_id in route_result.needed_ids:
-            entry = registry.get(entry_id) or _lookup_meta(registry, entry_id)
+            entry = registry.get(entry_id)
             default_ttl = entry.default_ttl if entry else 1
             new_entries.append(
                 ActivatedEntry(
@@ -88,11 +96,3 @@ class ActiveContextManager:
             [e for e in ctx.entries if e.remaining_ttl > 0],
             key=lambda e: -e.strength,
         )
-
-
-def _lookup_meta(registry: MaterialRegistry, entry_id: str):
-    """从注册表查找条目元数据（不触发懒加载）。"""
-    for entry in registry.all_entries():
-        if entry.id == entry_id:
-            return entry
-    return None
