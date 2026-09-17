@@ -71,6 +71,7 @@ class FireflyPlugin(FireflyCommandMixin, star.Star):
 
         plugin_dir = Path(__file__).resolve().parent
         data_dir = star.StarTools.get_data_dir("astrbot_plugin_Firefly")
+        self._role_dir = plugin_dir / "role"
 
         config_getter: Callable[[], ShellConfig] = self._build_config_getter()
         proactive_config_getter: Callable[[], ProactiveConfig] = (
@@ -79,7 +80,7 @@ class FireflyPlugin(FireflyCommandMixin, star.Star):
         cfg = config_getter()
 
         registry = MaterialRegistry(
-            plugin_dir / "role",
+            self._role_dir,
             cache_size=cfg.content_cache_max_entries,
         )
         store = StateStore(data_dir / "cognitive_state.json", persist=cfg.persist_state)
@@ -216,6 +217,8 @@ class FireflyPlugin(FireflyCommandMixin, star.Star):
 
         # 注册调试面板 API
         self._register_debug_api()
+        # 注册资料管理 API（只读 tree/file + 写路径 save/delete）
+        self._register_role_api()
 
     async def terminate(self) -> None:
         """插件停用时调用：停止主动消息并落盘保存动态状态。"""
@@ -236,6 +239,21 @@ class FireflyPlugin(FireflyCommandMixin, star.Star):
     ) -> None:
         """LLM 响应钩子：转发给注入器更新动态状态。"""
         await self._injector.on_llm_response(event, resp)
+
+    @filter.on_agent_begin()
+    async def handle_agent_begin(
+        self, event: AstrMessageEvent, run_context: Any
+    ) -> None:
+        """Agent 开始钩子：转发给注入器处理任务路径的外壳注入。
+
+        任务（cron 唤醒）路径不经过消息流水线，因此不会触发 on_llm_request；
+        本钩子在两条路径都会触发，由注入器自行判定是否属于任务路径。
+
+        Args:
+            event: 消息事件。
+            run_context: agent 运行上下文（含最终消息数组）。
+        """
+        await self._injector.on_agent_begin(event, run_context)
 
     def _build_config_getter(self) -> Callable[[], ShellConfig]:
         """构造外壳配置获取函数（每次调用返回最新配置）。
@@ -321,4 +339,24 @@ class FireflyPlugin(FireflyCommandMixin, star.Star):
         debug_api.register_routes()
         self.logger.info(
             f"[认知外壳] 调试面板 API 已注册，路由数={len(self.context.registered_web_apis)}"
+        )
+
+    def _register_role_api(self) -> None:
+        """注册资料管理 API（当前 AstrBot 版本不支持时跳过）。"""
+        if not hasattr(self.context, "register_web_api"):
+            return
+
+        from .adapter.role_api import RoleApi
+        from .core.role_store import RoleStore
+
+        role_api = RoleApi(
+            context=self.context,
+            store=RoleStore(self._role_dir),
+            registry=self._core.registry,
+            state_store=self._core.store,
+            logger=self.logger,
+        )
+        role_api.register_routes()
+        self.logger.info(
+            f"[认知外壳] 资料管理 API 已注册（含写路径），路由数={len(self.context.registered_web_apis)}"
         )

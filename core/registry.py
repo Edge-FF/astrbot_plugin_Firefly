@@ -14,7 +14,7 @@ from pathlib import Path
 
 from . import consts
 from .models import LoadReport, MaterialEntry
-from .parsers import parse_frontmatter, strip_html_comments
+from .parsers import coerce_int, coerce_str_list, parse_frontmatter, strip_html_comments
 
 
 def _infer_tier_kind(rel_path: str) -> tuple[int, str]:
@@ -105,8 +105,11 @@ class MaterialRegistry:
                 else:
                     warnings.append(f"读取失败：{entry.source_path}")
 
-        if old_index and not new_index:
-            warnings.append("本次加载结果为空，保留上一份资料快照")
+        if old_index and not new_index and warnings:
+            # 空结果只在"扫描期间出现过读取告警"时才视为失败并保留快照；
+            # 目录可读且确实没有 .md 时（例如删掉最后一个资料）应当接受空索引，
+            # 否则面板（以文件系统为准）与运行时索引会长期不一致。
+            warnings.append("本次加载为带告警的空结果，保留上一份资料快照")
             self._last_warnings = warnings
             return LoadReport(list(old_index.values()), warnings)
 
@@ -188,8 +191,14 @@ class MaterialRegistry:
     def _scan_directory(
         self, dest: dict[str, MaterialEntry], warnings: list[str], base_dir: Path
     ) -> None:
-        """递归扫描 role/ 目录。"""
-        for path in sorted(base_dir.iterdir()):
+        """递归扫描 role/ 目录（单个子目录不可读时告警并继续）。"""
+        try:
+            children = sorted(base_dir.iterdir())
+        except OSError:
+            warnings.append(f"目录读取失败：{base_dir.name or base_dir}")
+            return
+
+        for path in children:
             if path.name.startswith(consts.IGNORED_PREFIXES):
                 continue
 
@@ -226,17 +235,30 @@ class MaterialRegistry:
 
         auto_tier, auto_kind = _infer_tier_kind(rel_path)
 
-        # 解析条目
+        # 解析条目（脏值降级 + 告警：单个坏字段不应中断整次加载）
         entry_id = str(meta.get(consts.FM_KEY_ID) or path.stem)
         title = str(meta.get(consts.FM_KEY_TITLE) or path.stem)
-        tier = int(meta.get(consts.FM_KEY_TIER) or auto_tier)
+        tier = coerce_int(
+            meta.get(consts.FM_KEY_TIER) or auto_tier,
+            auto_tier,
+            warnings,
+            f"{path.name} 的 {consts.FM_KEY_TIER}",
+        )
         kind = str(meta.get(consts.FM_KEY_KIND) or auto_kind)
-        tags = tuple(meta.get(consts.FM_KEY_TAGS) or [])
-        keywords = tuple(meta.get(consts.FM_KEY_KEYWORDS) or [])
-        patterns = tuple(meta.get(consts.FM_KEY_PATTERNS) or [])
-        priority = int(meta.get(consts.FM_KEY_PRIORITY) or consts.DEFAULT_PRIORITY)
-        default_ttl = int(
-            meta.get(consts.FM_KEY_DEFAULT_TTL) or consts.DEFAULT_TTL_MAP.get(kind, 0)
+        tags = tuple(coerce_str_list(meta.get(consts.FM_KEY_TAGS)))
+        keywords = tuple(coerce_str_list(meta.get(consts.FM_KEY_KEYWORDS)))
+        patterns = tuple(coerce_str_list(meta.get(consts.FM_KEY_PATTERNS)))
+        priority = coerce_int(
+            meta.get(consts.FM_KEY_PRIORITY) or consts.DEFAULT_PRIORITY,
+            consts.DEFAULT_PRIORITY,
+            warnings,
+            f"{path.name} 的 {consts.FM_KEY_PRIORITY}",
+        )
+        default_ttl = coerce_int(
+            meta.get(consts.FM_KEY_DEFAULT_TTL) or consts.DEFAULT_TTL_MAP.get(kind, 0),
+            consts.DEFAULT_TTL_MAP.get(kind, 0),
+            warnings,
+            f"{path.name} 的 {consts.FM_KEY_DEFAULT_TTL}",
         )
 
         # ID 冲突检测

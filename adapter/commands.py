@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import time
 from datetime import datetime
 from typing import Any
@@ -14,6 +15,7 @@ class FireflyCommandMixin:
     """/firefly 管理命令组。"""
 
     _core: Any = None  # FireflyCore 容器
+    logger: logging.Logger  # 由主类 star.Star 在运行时注入
 
     @filter.command_group("firefly")
     def firefly(self) -> None:

@@ -565,6 +565,9 @@ class InjectionRecord:
     over_budget: bool = False
     token_estimate: int = 0
 
+    # 记录来源：llm_request（普通对话） / task_agent_begin（任务唤醒）
+    injection_source: str = "llm_request"
+
     # 注入状态
     injected_successfully: bool = True
     skipped_reason: str | None = None
@@ -656,6 +659,7 @@ class InjectionRecord:
             "truncated_ids": self.truncated_ids,
             "over_budget": self.over_budget,
             "token_estimate": self.token_estimate,
+            "injection_source": self.injection_source,
             "injected_successfully": self.injected_successfully,
             "skipped_reason": self.skipped_reason,
         }

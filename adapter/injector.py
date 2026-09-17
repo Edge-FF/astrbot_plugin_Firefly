@@ -12,8 +12,11 @@
     [F] AffectEngine 更新动态状态（事件驱动，含 P4 闭环）
     [G] ActiveContextManager.tick() → 衰减 TTL
 
-说明：心情更新已从「直接采用用户情绪」改为「事件 → 反应」，
-用户情绪只作为 RouteSignals.user_emotion 传入 AffectEngine。
+说明：
+  - 心情更新已从「直接采用用户情绪」改为「事件 → 反应」，
+    用户情绪只作为 RouteSignals.user_emotion 传入 AffectEngine。
+  - 任务路径（AstrBot cron 唤醒）不是「用户说话」：其响应到达时
+    完全跳过状态更新，避免把任务说明当作对话内容污染情绪状态。
 """
 
 from __future__ import annotations
@@ -23,11 +26,12 @@ import uuid
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
-from astrbot.core.agent.message import TextPart
+from astrbot.core.agent.message import Message, TextPart
 
 from ..core import consts
 from ..core.affect import EVENT_REUNION, AffectEngine, AffectEvent
 from ..core.models import (
+    BuildResult,
     InjectionRecord,
     RouteResult,
     RouteSignals,
@@ -39,6 +43,7 @@ from ..core.updaters import update_recent_topics
 if TYPE_CHECKING:
     from astrbot.api.event import AstrMessageEvent
     from astrbot.api.provider import LLMResponse, ProviderRequest
+    from astrbot.core.agent.run_context import ContextWrapper
 
     from ..core.assembly import ShellAssembly
     from ..core.context_manager import ActiveContextManager
@@ -114,6 +119,71 @@ class CognitiveShellInjector:
         except Exception as exc:
             self._logger.error(f"[认知外壳] 动态状态更新失败：{exc}", exc_info=True)
 
+    async def on_agent_begin(
+        self, event: AstrMessageEvent, run_context: ContextWrapper[Any]
+    ) -> None:
+        """Agent 开始钩子：任务路径下把外壳注入 system 消息。
+
+        普通对话由 ``on_llm_request`` 负责注入，本钩子只处理任务（cron 唤醒）
+        路径，两条路径互斥，从结构上避免重复注入。
+
+        Args:
+            event: 消息事件。
+            run_context: agent 运行上下文（含最终消息数组 messages）。
+        """
+        try:
+            await self._inject_for_task(event, run_context)
+        except Exception as exc:
+            self._logger.error(
+                f"[认知外壳] 任务路径注入失败，本次跳过：{exc}", exc_info=True
+            )
+
+    async def _inject_for_task(
+        self, event: AstrMessageEvent, run_context: ContextWrapper[Any]
+    ) -> None:
+        """任务路径注入主流程：判定 → 闸门 → 组装 → 注入 system 消息。
+
+        注入位置为最前面的连续 system 消息（依据 P1-0 实测：仅该位置能在
+        各类上下文压缩策略下存活，且权威更高）。
+
+        Args:
+            event: 消息事件。
+            run_context: agent 运行上下文。
+        """
+        # 仅处理任务路径；普通对话不走此分支（与 on_llm_request 互斥）
+        if not self._is_task_event(event):
+            return
+
+        config = self._config_getter()
+        session_id = getattr(event, "unified_msg_origin", None) or ""
+
+        messages = getattr(run_context, "messages", None)
+        if not isinstance(messages, list) or not messages:
+            self._record_agent_begin(session_id, None, "no_messages")
+            return
+
+        skip_reason = self._check_gates(
+            session_id, config, already_injected=self._has_shell_in_messages(messages)
+        )
+        if skip_reason is not None:
+            self._record_agent_begin(session_id, None, skip_reason)
+            return
+
+        state = await self._store.get(session_id)
+        result = self._build_shell(state, config)
+        if result.is_empty():
+            self._record_agent_begin(session_id, None, "empty_build")
+            return
+
+        target = self._last_leading_system_message(messages)
+        if target is None:
+            # 兜底：无 system 消息时插入一条，仍保持 system 位置（压缩下可存活）
+            messages.insert(0, Message(role="system", content=result.text))
+        else:
+            target.content = self._append_text(target.content, result.text)
+
+        self._record_agent_begin(session_id, result, None)
+
     async def _inject(self, event: AstrMessageEvent, req: ProviderRequest) -> None:
         """执行 A-E 注入主流程：读取状态→路由→合并→组装→注入。
 
@@ -123,20 +193,14 @@ class CognitiveShellInjector:
         """
         config = self._config_getter()
         ts = time.time()
-
-        skip_reason: str | None = None
-        if not config.enabled:
-            skip_reason = "disabled"
         session_id = getattr(event, "unified_msg_origin", None) or ""
+
         # 丢弃上一轮遗留的信号，避免本轮请求被跳过时误用旧信号
         self._pending_signals.pop(session_id, None)
-        if skip_reason is None and not config.is_session_enabled(session_id):
-            skip_reason = "session_filtered"
-        if skip_reason is None and self._has_shell_block(req):
-            skip_reason = "duplicate"
-        if skip_reason is None and not self._registry.is_loaded:
-            skip_reason = "empty_registry"
 
+        skip_reason = self._check_gates(
+            session_id, config, already_injected=self._has_shell_block(req)
+        )
         if skip_reason is not None:
             self._record_skip(event, req, session_id, ts, skip_reason)
             return
@@ -161,20 +225,14 @@ class CognitiveShellInjector:
         )
         state.active_context = new_ctx
 
-        # [D] ShellAssembly.build()
-        result = self._assembly.build(state, config.max_tokens)
+        # [D] 组装外壳（复用层）
+        result = self._build_shell(state, config)
         if result.is_empty():
             self._record_skip(event, req, session_id, ts, "empty_build")
             return
 
         # [E] 注入
         req.extra_user_content_parts.append(TextPart(text=result.text))
-
-        if result.over_budget or result.truncated:
-            self._logger.warning(
-                f"[认知外壳] token 超预算：{result.over_budget}，"
-                f"本次裁剪的激活条目：{list(result.truncated)}"
-            )
 
         # 持久化
         await self._store.set(session_id, state)
@@ -198,6 +256,10 @@ class CognitiveShellInjector:
     async def _update_state(self, event: AstrMessageEvent, resp: LLMResponse) -> None:
         """执行 F-G 状态更新流程：事件驱动更新心情并衰减激活上下文。
 
+        任务路径（cron 唤醒）不是「用户说话」，因此完全跳过状态更新：
+        不回灌情绪、不触发 reunion、不清零未回复、不更新话题与时间戳。
+        详见 PLAN_task_shell.md 决策 D2。
+
         Args:
             event: 消息事件。
             resp: LLM 响应体。
@@ -207,6 +269,11 @@ class CognitiveShellInjector:
             return
         session_id = getattr(event, "unified_msg_origin", None) or ""
         if not config.is_session_enabled(session_id):
+            return
+
+        # 任务事件：收尾侧不做任何状态写入（避免把 note 当成用户消息）
+        if self._is_task_event(event):
+            self._record_task_event_skip(session_id)
             return
 
         user_text = getattr(event, "message_str", None) or ""
@@ -233,6 +300,116 @@ class CognitiveShellInjector:
 
         await self._store.set(session_id, new_state)
 
+    def _check_gates(
+        self,
+        session_id: str,
+        config: ShellConfig,
+        *,
+        already_injected: bool = False,
+    ) -> str | None:
+        """统一的能力/开关闸门检查（两条路径共用）。
+
+        顺序即优先级：总开关 → 会话白名单 → 重复注入 → 资料已加载。
+
+        Args:
+            session_id: 会话唯一标识。
+            config: 当前外壳配置。
+            already_injected: 本次目标中是否已存在外壳。
+
+        Returns:
+            跳过原因；全部通过时返回 None。
+        """
+        if not config.enabled:
+            return "disabled"
+        if not config.is_session_enabled(session_id):
+            return "session_filtered"
+        if already_injected:
+            return "duplicate"
+        if not self._registry.is_loaded:
+            return "empty_registry"
+        return None
+
+    def _build_shell(self, state: SessionState, config: ShellConfig) -> BuildResult:
+        """组装外壳并在超预算时告警（两条路径共用）。
+
+        Args:
+            state: 会话状态。
+            config: 当前外壳配置（提供 token 预算）。
+
+        Returns:
+            组装结果；调用方需自行判断 ``is_empty()``。
+        """
+        result = self._assembly.build(state, config.max_tokens)
+        if result.over_budget or result.truncated:
+            self._logger.warning(
+                f"[认知外壳] token 超预算：{result.over_budget}，"
+                f"本次裁剪的激活条目：{list(result.truncated)}"
+            )
+        return result
+
+    @staticmethod
+    def _has_shell_in_messages(messages: list[Any]) -> bool:
+        """检测消息数组中是否已存在外壳标记（防止重复注入）。
+
+        Args:
+            messages: 消息数组。
+
+        Returns:
+            已包含注入标记时返回 True。
+        """
+        for message in messages:
+            content = getattr(message, "content", None)
+            if isinstance(content, str):
+                if consts.SHELL_INJECTION_MARK in content:
+                    return True
+            elif isinstance(content, list):
+                for part in content:
+                    text = (
+                        part.get("text")
+                        if isinstance(part, dict)
+                        else getattr(part, "text", None)
+                    )
+                    if isinstance(text, str) and consts.SHELL_INJECTION_MARK in text:
+                        return True
+        return False
+
+    @staticmethod
+    def _last_leading_system_message(messages: list[Any]) -> Any | None:
+        """返回最前面的连续 system 消息中的最后一条。
+
+        与 AstrBot 的 ``_split_system_rest`` 语义一致：只有开头的连续 system
+        消息在上下文压缩时会被保留，因此外壳注入此处可确保存活。
+
+        Args:
+            messages: 消息数组。
+
+        Returns:
+            目标 system 消息；不存在时返回 None。
+        """
+        target = None
+        for message in messages:
+            if getattr(message, "role", None) != "system":
+                break
+            target = message
+        return target
+
+    @staticmethod
+    def _append_text(content: Any, text: str) -> Any:
+        """把文本追加到消息 content 末尾，兼容 str / list / 其它。
+
+        Args:
+            content: 原 content。
+            text: 要追加的文本。
+
+        Returns:
+            追加后的 content。
+        """
+        if isinstance(content, str):
+            return f"{content}\n\n{text}" if content else text
+        if isinstance(content, list):
+            return [*content, TextPart(text=text)]
+        return text
+
     @staticmethod
     def _has_shell_block(req: ProviderRequest) -> bool:
         """检测请求中是否已存在认知外壳块（防止重复注入）。
@@ -250,6 +427,36 @@ class CognitiveShellInjector:
                 text = getattr(part, "text", None)
             if isinstance(text, str) and consts.SHELL_INJECTION_MARK in text:
                 return True
+        return False
+
+    @staticmethod
+    def _is_task_event(event: AstrMessageEvent) -> bool:
+        """判断本次事件是否来自 AstrBot 任务（cron 唤醒）路径。
+
+        采用双保险信号，任一命中即判定为任务事件：
+          1. 主信号：事件平台名落在 ``TASK_EVENT_PLATFORM_NAMES``
+          2. 兜底信号：事件 extras 中存在 ``TASK_EVENT_EXTRA_KEY``
+
+        健壮性约定：任何属性缺失或访问异常，一律判定为「非任务事件」，
+        从而保守回退到普通对话行为，绝不误伤正常链路。
+
+        Args:
+            event: 消息事件。
+
+        Returns:
+            来自任务路径返回 True；否则返回 False。
+        """
+        try:
+            platform_meta = getattr(event, "platform_meta", None)
+            name = getattr(platform_meta, "name", None)
+            if isinstance(name, str) and name in consts.TASK_EVENT_PLATFORM_NAMES:
+                return True
+
+            get_extra = getattr(event, "get_extra", None)
+            if callable(get_extra) and get_extra(consts.TASK_EVENT_EXTRA_KEY):
+                return True
+        except Exception:
+            return False
         return False
 
     # ------------------------------------------------------------------
@@ -326,6 +533,57 @@ class CognitiveShellInjector:
             user_msg=user_msg[:200],
             route_source="keyword",
             injected_successfully=False,
+            skipped_reason=reason,
+        )
+        self._debug_recorder.record(rec)
+
+    def _record_task_event_skip(self, session_id: str) -> None:
+        """记录一次因任务事件而跳过的状态更新（可观测，避免静默）。
+
+        Args:
+            session_id: 会话唯一标识。
+        """
+        self._logger.debug(f"[认知外壳] 会话 {session_id} 为任务事件，跳过状态更新。")
+        if self._debug_recorder is None:
+            return
+        rec = InjectionRecord(
+            record_id=str(uuid.uuid4())[:12],
+            session_id=session_id,
+            timestamp=time.time(),
+            user_msg="",
+            route_source="keyword",
+            injected_successfully=False,
+            skipped_reason="task_event_no_state_update",
+        )
+        self._debug_recorder.record(rec)
+
+    def _record_agent_begin(
+        self, session_id: str, result: BuildResult | None, reason: str | None
+    ) -> None:
+        """记录一次任务路径的注入或跳过（可观测，避免静默）。
+
+        Args:
+            session_id: 会话唯一标识。
+            result: 组装结果（成功时提供）。
+            reason: 跳过原因（跳过时提供）；为 None 表示注入成功。
+        """
+        if reason is not None:
+            self._logger.debug(
+                f"[认知外壳] 任务路径跳过注入：{reason}（会话 {session_id}）"
+            )
+        if self._debug_recorder is None:
+            return
+        xml_text = result.text if result is not None else ""
+        rec = InjectionRecord(
+            record_id=str(uuid.uuid4())[:12],
+            session_id=session_id,
+            timestamp=time.time(),
+            user_msg="",
+            route_source="keyword",
+            injection_source="task_agent_begin",
+            injection_xml=xml_text[:8000],
+            token_estimate=len(xml_text) // 2,
+            injected_successfully=reason is None,
             skipped_reason=reason,
         )
         self._debug_recorder.record(rec)

@@ -79,6 +79,17 @@ SHELL_ON_DEMAND_TAG = "shell_on_demand"
 SHELL_INJECTION_MARK = f"<{SHELL_BLOCK_TAG}>"
 
 # ============================================================================
+# 任务路径识别（AstrBot cron 唤醒）
+# 依据：
+#   - CronMessageEvent 使用 PlatformMetadata(name="cron")
+#   - CronJobManager._run_active_agent_job 会写入 extras["cron_job"]
+# 双保险信号，任一命中即视为任务事件。
+# ============================================================================
+
+TASK_EVENT_PLATFORM_NAMES: tuple[str, ...] = ("cron",)
+TASK_EVENT_EXTRA_KEY = "cron_job"
+
+# ============================================================================
 # 动态状态的默认值与边界
 # ============================================================================
 

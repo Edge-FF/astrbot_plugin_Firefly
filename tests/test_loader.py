@@ -5,8 +5,12 @@ from __future__ import annotations
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
+from astrbot_plugin_Firefly.core import consts
 from astrbot_plugin_Firefly.core.parsers import (
+    coerce_int,
+    coerce_str_list,
     parse_frontmatter,
     strip_html_comments,
 )
@@ -56,6 +60,87 @@ enabled: true
         """验证 HTML 注释被清除。"""
         text = "<!-- 占位说明 -->\n正文内容\n<!-- 结尾注释 -->"
         self.assertEqual(strip_html_comments(text), "\n正文内容\n")
+
+    def test_quoted_scalar_strips_quotes_and_unescapes(self):
+        """验证成对引号被剥离：含 : / # / 方括号的值不再被误解析。"""
+        text = '---\ntitle: "战斗: 技巧 #1"\nid: \'skill_a\'\n---\n正文。'
+        meta, body = parse_frontmatter(text)
+        self.assertEqual(meta["title"], "战斗: 技巧 #1")
+        self.assertEqual(meta["id"], "skill_a")
+        self.assertEqual(body, "正文。")
+
+    def test_quoted_scalar_stays_string(self):
+        """验证引号表示显式字符串：不再做数字/布尔推断。"""
+        text = '---\npriority: "80"\nflag: "true"\n---\n正文。'
+        meta, _ = parse_frontmatter(text)
+        self.assertEqual(meta["priority"], "80")
+        self.assertEqual(meta["flag"], "true")
+
+    def test_unquoted_scalar_still_typed(self):
+        """验证未加引号的值仍保持原有类型推断。"""
+        text = "---\npriority: 80\nratio: 1.5\nflag: true\nnothing: null\n---\n正文。"
+        meta, _ = parse_frontmatter(text)
+        self.assertEqual(meta["priority"], 80)
+        self.assertEqual(meta["ratio"], 1.5)
+        self.assertIs(meta["flag"], True)
+        self.assertIsNone(meta["nothing"])
+
+    def test_escape_sequences_inside_quotes(self):
+        """验证引号内的转义序列被还原。"""
+        text = '---\ntitle: "a\\"b\\\\c\\nd"\n---\n正文。'
+        meta, _ = parse_frontmatter(text)
+        self.assertEqual(meta["title"], 'a"b\\c\nd')
+
+    def test_list_quoted_items_with_comma(self):
+        """验证列表元素支持引号，且引号内的逗号不参与切分。"""
+        text = '---\nkeywords: ["a,b", \'c\', d]\n---\n正文。'
+        meta, _ = parse_frontmatter(text)
+        self.assertEqual(meta["keywords"], ["a,b", "c", "d"])
+
+    def test_list_item_with_escaped_quote(self):
+        """验证列表元素内的转义引号被还原且不提前闭合。"""
+        text = '---\nkeywords: ["a\\"b", c]\n---\n正文。'
+        meta, _ = parse_frontmatter(text)
+        self.assertEqual(meta["keywords"], ['a"b', "c"])
+
+    def test_hash_is_comment_only_at_line_start(self):
+        """验证 `#` 仅在行首算注释，行内的 `#` 属于值本身。"""
+        text = "---\n# 注释行\ntitle: a#b\n---\n正文。"
+        meta, _ = parse_frontmatter(text)
+        self.assertEqual(list(meta.keys()), ["title"])
+        self.assertEqual(meta["title"], "a#b")
+
+    def test_serializer_style_text_roundtrips(self):
+        """验证序列化器风格的引号写法可无损读回（S4 往返前提）。"""
+        text = '---\nid: "a: b"\ntags: ["x,y"]\ntier: 3\n---\n正文。'
+        meta, _ = parse_frontmatter(text)
+        self.assertEqual(meta["id"], "a: b")
+        self.assertEqual(meta["tags"], ["x,y"])
+        self.assertEqual(meta["tier"], 3)
+
+
+class TestCoerceHelpers(unittest.TestCase):
+    """front-matter 值的降级转换工具。"""
+
+    def test_coerce_int_fallbacks(self) -> None:
+        """可转换的值正常返回；脏值返回 fallback 并记录告警。"""
+        warnings: list[str] = []
+        self.assertEqual(coerce_int(3, 1), 3)
+        self.assertEqual(coerce_int("3", 1), 3)
+        self.assertEqual(coerce_int(3.7, 1), 3)
+        self.assertEqual(coerce_int(None, 1), 1)
+        self.assertEqual(coerce_int("abc", 1, warnings, "x.md 的 tier"), 1)
+        self.assertEqual(coerce_int([1], 1, warnings, "x.md 的 tier"), 1)
+        self.assertEqual(len(warnings), 2)
+        self.assertTrue(all("不是整数" in w for w in warnings))
+
+    def test_coerce_str_list(self) -> None:
+        """标量视为单项列表，避免被 tuple() 拆成字符。"""
+        self.assertEqual(coerce_str_list(None), [])
+        self.assertEqual(coerce_str_list(""), [])
+        self.assertEqual(coerce_str_list("战斗"), ["战斗"])
+        self.assertEqual(coerce_str_list(["a", 0]), ["a", "0"])
+        self.assertEqual(coerce_str_list(("x",)), ["x"])
 
 
 class TestMaterialRegistry(unittest.TestCase):
@@ -159,6 +244,51 @@ class TestMaterialRegistry(unittest.TestCase):
             self.assertTrue(report.has_warnings())
             self.assertTrue(any("冲突" in w for w in report.warnings))
 
+    def test_dirty_frontmatter_degrades_without_aborting_load(self) -> None:
+        """脏 front-matter 只降级 + 告警，不得中断整次加载。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            role_dir = Path(tmp)
+            _write(role_dir, "技能/正常.md", "---\nid: ok_one\nkind: skill\n---\n正常内容。")
+            _write(
+                role_dir,
+                "技能/脏值.md",
+                "---\nid: dirty\ntier: abc\npriority: high\n"
+                "default_ttl: [1, 2]\ntags: 战斗\nkeywords: [0]\n---\n脏值内容。",
+            )
+
+            registry = MaterialRegistry(role_dir)
+            report = registry.load()
+
+            self.assertEqual(registry.entry_count, 2)
+            dirty = [e for e in registry.all_entries() if e.id == "dirty"][0]
+            self.assertEqual(dirty.tier, consts.TIER_SKILL_LORE)
+            self.assertEqual(dirty.priority, consts.DEFAULT_PRIORITY)
+            self.assertEqual(dirty.default_ttl, consts.DEFAULT_TTL_MAP[consts.KIND_SKILL])
+            self.assertEqual(dirty.tags, ("战斗",))
+            self.assertEqual(dirty.trigger_keywords, ("0",))
+            self.assertTrue(any("不是整数" in w for w in report.warnings))
+            self.assertIn("ok_one", registry.index_summary())
+
+    def test_scan_survives_unreadable_dir(self) -> None:
+        """子目录不可读时告警并继续扫描其它文件。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            role_dir = Path(tmp)
+            _write(role_dir, "技能/好.md", "---\nid: good\n---\n内容。")
+            _write(role_dir, "坏目录/x.md", "---\nid: bad\n---\n内容。")
+            original = Path.iterdir
+
+            def fake_iterdir(self: Path):
+                if self.name == "坏目录":
+                    raise PermissionError("denied")
+                return original(self)
+
+            with mock.patch.object(Path, "iterdir", fake_iterdir):
+                registry = MaterialRegistry(role_dir)
+                report = registry.load()
+
+            self.assertEqual(registry.entry_count, 1)
+            self.assertTrue(any("目录读取失败" in w for w in report.warnings))
+
     def test_index_summary(self):
         """验证索引摘要包含条目 ID 与标签。"""
         with tempfile.TemporaryDirectory() as tmp:
@@ -173,19 +303,41 @@ class TestMaterialRegistry(unittest.TestCase):
             self.assertIn("标签", summary)
 
     def test_reload_keeps_on_failure(self):
-        """验证重载失败时保留上一份快照。"""
+        """验证重载遇到读取失败时保留上一份快照。"""
         with tempfile.TemporaryDirectory() as tmp:
             role_dir = Path(tmp)
             _write(role_dir, "基础人设.md", "---\n---\n旧内容。")
             registry = MaterialRegistry(role_dir)
-            report1 = registry.load()
+            registry.load()
             self.assertEqual(registry.entry_count, 1)
 
-            import os
-            os.remove(role_dir / "基础人设.md")
-            report2 = registry.reload()
+            original = Path.iterdir
+
+            def fake_iterdir(self: Path):
+                if self == role_dir:
+                    raise PermissionError("denied")
+                return original(self)
+
+            with mock.patch.object(Path, "iterdir", fake_iterdir):
+                report = registry.reload()
+
             self.assertEqual(registry.entry_count, 1)
-            self.assertTrue(report2.has_warnings())
+            self.assertTrue(any("保留上一份资料快照" in w for w in report.warnings))
+
+    def test_reload_to_empty_dir_clears_index(self):
+        """目录可读但已无 .md 时接受空索引（删掉最后一个资料后的正确状态）。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            role_dir = Path(tmp)
+            _write(role_dir, "基础人设.md", "---\n---\n旧内容。")
+            registry = MaterialRegistry(role_dir)
+            registry.load()
+            self.assertEqual(registry.entry_count, 1)
+
+            (role_dir / "基础人设.md").unlink()
+            report = registry.reload()
+
+            self.assertEqual(registry.entry_count, 0)
+            self.assertFalse(report.has_warnings())
 
     def test_missing_role_dir(self):
         """验证目录缺失时安全返回告警。"""

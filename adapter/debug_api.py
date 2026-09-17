@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import logging
 import time
 from typing import TYPE_CHECKING, Any
 
@@ -53,7 +54,7 @@ class DebugApi:
         router,
         ctx_manager,
         builder,
-        logger=None,
+        logger: logging.Logger | None = None,
         proactive=None,
     ) -> None:
         """初始化调试面板 API。
@@ -96,7 +97,8 @@ class DebugApi:
             return
         reg = self._ctx.register_web_api
         P = self._P
-        self._logger.info(f"[认知外壳] 插件名={self._plugin_name}, API前缀={P}")
+        if self._logger is not None:
+            self._logger.info(f"[认知外壳] 插件名={self._plugin_name}, API前缀={P}")
 
         reg(f"{P}/sessions", self._sessions_list, ["GET"], "")
         reg(f"{P}/sessions/detail", self._sessions_detail, ["GET"], "")
@@ -107,6 +109,7 @@ class DebugApi:
         reg(f"{P}/sessions/delete", self._sessions_delete, ["POST"], "")
         reg(f"{P}/injections", self._injections_list, ["GET"], "")
         reg(f"{P}/injections/detail", self._injections_detail, ["GET"], "")
+        reg(f"{P}/injections/clear", self._injections_clear, ["POST"], "")
         reg(f"{P}/materials", self._materials_list, ["GET"], "")
         reg(f"{P}/materials/detail", self._materials_detail, ["GET"], "")
         reg(f"{P}/materials/reload", self._materials_reload, ["POST"], "")
@@ -415,6 +418,21 @@ class DebugApi:
                     "session_ids": self._recorder.get_session_ids(),
                 }
             )
+        except Exception as e:
+            return error(str(e))
+
+    async def _injections_clear(self, **kw) -> dict:
+        """POST：清空注入日志，不改动任何会话状态。
+
+        与 sessions/reset 的区别：本接口只清理调试记录，适合面板的「清空日志」。
+
+        请求体: session_id（可选，留空表示清空全部会话的记录）
+        """
+        try:
+            body = await self._get_json()
+            sid = str(body.get("session_id", "") or "")
+            removed = self._recorder.clear(sid or None)
+            return ok({"removed": removed, "session_id": sid})
         except Exception as e:
             return error(str(e))
 
