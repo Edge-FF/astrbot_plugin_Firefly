@@ -6,7 +6,7 @@ import logging
 import tempfile
 import unittest
 from pathlib import Path
-from unittest import IsolatedAsyncioTestCase
+from unittest import IsolatedAsyncioTestCase, mock
 
 from astrbot.core.agent.message import Message, TextPart
 from astrbot.core.provider.entities import ProviderRequest
@@ -552,6 +552,27 @@ class TestCognitiveShellInjector(IsolatedAsyncioTestCase):
         self.assertEqual(len(records), 1)
         self.assertEqual(records[0].injection_source, "task_agent_begin")
         self.assertTrue(records[0].injected_successfully)
+
+    async def test_astrbot_api_unavailable_skips_and_is_recorded(self):
+        """P1-2：AstrBot 内部 API 缺失时走能力闸门跳过，并留下可观测记录。"""
+        from astrbot_plugin_Firefly.adapter import astrbot_compat
+        from astrbot_plugin_Firefly.adapter.debug_recorder import DebugRecorder
+
+        injector, _ = self._make_injector(ShellConfig())
+        recorder = DebugRecorder()
+        injector._debug_recorder = recorder
+        req = ProviderRequest()
+
+        with mock.patch.object(astrbot_compat, "INJECTION_API_AVAILABLE", False):
+            await injector.on_llm_request(_FakeEvent(message_str="战斗"), req)
+
+        self.assertEqual(req.extra_user_content_parts, [])
+        reasons = [
+            r.skipped_reason
+            for r in recorder.get_recent("s1", limit=10)
+            if not r.injected_successfully
+        ]
+        self.assertIn("astrbot_api_unavailable", reasons)
 
     async def test_active_context_persists_across_rounds(self):
         """验证激活上下文的惯性：注入后状态被保存。"""

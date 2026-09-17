@@ -26,8 +26,6 @@ import uuid
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
-from astrbot.core.agent.message import Message, TextPart
-
 from ..core import consts
 from ..core.affect import EVENT_REUNION, AffectEngine, AffectEvent
 from ..core.models import (
@@ -39,17 +37,18 @@ from ..core.models import (
     ShellConfig,
 )
 from ..core.updaters import update_recent_topics
+from . import astrbot_compat
 
 if TYPE_CHECKING:
     from astrbot.api.event import AstrMessageEvent
     from astrbot.api.provider import LLMResponse, ProviderRequest
-    from astrbot.core.agent.run_context import ContextWrapper
 
     from ..core.assembly import ShellAssembly
     from ..core.context_manager import ActiveContextManager
     from ..core.registry import MaterialRegistry
     from ..core.router import ContextRouter
     from ..core.state import StateStore
+    from .astrbot_compat import ContextWrapper
     from .debug_recorder import DebugRecorder
 
 
@@ -178,7 +177,9 @@ class CognitiveShellInjector:
         target = self._last_leading_system_message(messages)
         if target is None:
             # 兜底：无 system 消息时插入一条，仍保持 system 位置（压缩下可存活）
-            messages.insert(0, Message(role="system", content=result.text))
+            messages.insert(
+                0, astrbot_compat.Message(role="system", content=result.text)
+            )
         else:
             target.content = self._append_text(target.content, result.text)
 
@@ -226,7 +227,7 @@ class CognitiveShellInjector:
             return
 
         # [E] 注入
-        req.extra_user_content_parts.append(TextPart(text=result.text))
+        req.extra_user_content_parts.append(astrbot_compat.TextPart(text=result.text))
 
         # 持久化
         await self._store.set(session_id, state)
@@ -303,7 +304,8 @@ class CognitiveShellInjector:
     ) -> str | None:
         """统一的能力/开关闸门检查（两条路径共用）。
 
-        顺序即优先级：总开关 → 会话白名单 → 重复注入 → 资料已加载。
+        顺序即优先级：AstrBot 接口可用性 → 总开关 → 会话白名单
+        → 重复注入 → 资料已加载。
 
         Args:
             session_id: 会话唯一标识。
@@ -313,6 +315,8 @@ class CognitiveShellInjector:
         Returns:
             跳过原因；全部通过时返回 None。
         """
+        if not astrbot_compat.INJECTION_API_AVAILABLE:
+            return "astrbot_api_unavailable"
         if not config.enabled:
             return "disabled"
         if not config.is_session_enabled(session_id):
@@ -401,7 +405,7 @@ class CognitiveShellInjector:
         if isinstance(content, str):
             return f"{content}\n\n{text}" if content else text
         if isinstance(content, list):
-            return [*content, TextPart(text=text)]
+            return [*content, astrbot_compat.TextPart(text=text)]
         return text
 
     @staticmethod

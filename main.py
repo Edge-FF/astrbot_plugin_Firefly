@@ -14,8 +14,12 @@ from typing import Any
 from astrbot.api import star
 from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.provider import LLMResponse, ProviderRequest
-from astrbot.core.message.message_event_result import MessageChain
 
+from .adapter.astrbot_compat import (
+    PROACTIVE_SEND_API_AVAILABLE,
+    MessageChain,
+    missing_api_summary,
+)
 from .adapter.commands import FireflyCommandMixin
 from .adapter.debug_recorder import DebugRecorder
 from .adapter.injector import CognitiveShellInjector
@@ -194,6 +198,12 @@ class FireflyPlugin(FireflyCommandMixin, star.Star):
 
     async def initialize(self) -> None:
         """插件激活时调用：加载资料与动态状态，启动主动消息，并注册调试 API。"""
+        missing = missing_api_summary()
+        if missing:
+            self.logger.warning(
+                f"[认知外壳] 检测到 AstrBot 内部 API 缺失，相关功能将自动降级：{missing}"
+            )
+
         report = self._core.registry.load()
         for warning in report.warnings:
             self.logger.warning(f"[认知外壳] 资料加载告警：{warning}")
@@ -311,7 +321,12 @@ class FireflyPlugin(FireflyCommandMixin, star.Star):
         Args:
             session_id: 会话唯一标识（UMO）。
             text: 消息文本。
+
+        Raises:
+            RuntimeError: 当前 AstrBot 版本缺少消息链构造能力。
         """
+        if not PROACTIVE_SEND_API_AVAILABLE:
+            raise RuntimeError("当前 AstrBot 版本缺少 MessageChain，主动消息无法发送")
         await self.context.send_message(session_id, MessageChain().message(text))
 
     def _register_debug_api(self) -> None:
