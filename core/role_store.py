@@ -33,7 +33,7 @@ from .parsers import (
     parse_frontmatter,
     strip_html_comments,
 )
-from .registry import _infer_tier_kind
+from .tier_rules import infer_tier_kind
 
 # 路径深度上限（含文件名）
 MAX_PATH_DEPTH = 8
@@ -481,7 +481,7 @@ class RoleStore:
         if not body_text:
             raise RoleStoreError("正文不能为空")
 
-        auto_tier, auto_kind = _infer_tier_kind(rel_posix)
+        auto_tier, auto_kind = infer_tier_kind(rel_posix)
         entry_id = str(written.get(consts.FM_KEY_ID) or path.stem)
         if not _ID_RE.fullmatch(entry_id):
             raise RoleStoreError(
@@ -662,7 +662,7 @@ class RoleStore:
                 return None
 
             hidden = _has_hidden_segment(rel_posix)
-            auto_tier, auto_kind = _infer_tier_kind(rel_posix)
+            auto_tier, auto_kind = infer_tier_kind(rel_posix)
             entry: dict[str, Any] = {
                 "path": rel_posix,
                 "name": path.name,
