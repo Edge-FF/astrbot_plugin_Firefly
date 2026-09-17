@@ -12,6 +12,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from .parsers import coerce_bool, coerce_float, coerce_int
+
 
 @dataclass(frozen=True)
 class ShellConfig:
@@ -48,11 +50,19 @@ class ShellConfig:
     content_cache_max_entries: int = 50
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any] | None) -> ShellConfig:
+    def from_dict(
+        cls,
+        data: dict[str, Any] | None,
+        warnings: list[str] | None = None,
+    ) -> ShellConfig:
         """从插件配置字典构建 ShellConfig，缺失字段使用默认值。
+
+        缺失（None）静默使用默认值；存在但无法转换的脏值会回退为默认值，
+        并在 `warnings` 中记录一条说明（原先这类脏值被静默吞掉）。
 
         Args:
             data: _conf_schema.json 对应的配置字典，可为 None。
+            warnings: 告警收集列表，None 表示静默降级。
 
         Returns:
             填充好默认值的 ShellConfig。
@@ -64,56 +74,91 @@ class ShellConfig:
         active_cfg = data.get("active_context", {}) or {}
         cache_cfg = data.get("content_cache", {}) or {}
 
-        def _int(value: Any, default: int) -> int:
-            """安全转 int，失败时返回默认值。"""
-            try:
-                return int(value)
-            except (TypeError, ValueError):
-                return default
-
-        def _float(value: Any, default: float) -> float:
-            """安全转 float，失败时返回默认值。"""
-            try:
-                return float(value)
-            except (TypeError, ValueError):
-                return default
-
-        def _bool(value: Any, default: bool) -> bool:
-            """安全转 bool：布尔直用，字符串按常见真值解析，其余返回默认值。"""
-            if isinstance(value, bool):
-                return value
-            if isinstance(value, str):
-                return value.strip().lower() in ("1", "true", "yes", "on")
-            return default
-
         enabled_sessions = inject.get("enabled_sessions", []) or []
         if isinstance(enabled_sessions, str):
             enabled_sessions = [enabled_sessions]
 
         return cls(
-            enabled=_bool(data.get("enabled"), True),
-            max_tokens=_int(inject.get("max_tokens"), 1500),
-            max_on_demand=_int(inject.get("max_on_demand"), 3),
+            enabled=coerce_bool(data.get("enabled"), True, warnings, "enabled"),
+            max_tokens=coerce_int(
+                inject.get("max_tokens"), 1500, warnings, "inject.max_tokens"
+            ),
+            max_on_demand=coerce_int(
+                inject.get("max_on_demand"), 3, warnings, "inject.max_on_demand"
+            ),
             enabled_sessions=tuple(str(s) for s in enabled_sessions if str(s).strip()),
-            tier1_reserved=_int(inject.get("tier1_reserved"), 600),
-            router_use_llm=_bool(router_cfg.get("use_llm"), False),
-            router_llm_timeout=_float(router_cfg.get("llm_timeout_seconds"), 3.0),
-            router_fallback_to_keyword=_bool(
-                router_cfg.get("fallback_to_keyword"), True
+            tier1_reserved=coerce_int(
+                inject.get("tier1_reserved"), 600, warnings, "inject.tier1_reserved"
             ),
-            router_cache_enabled=_bool(router_cfg.get("cache_enabled"), True),
-            persist_state=_bool(state_cfg.get("persist"), True),
-            state_use_llm=_bool(state_cfg.get("use_llm"), False),
-            decay_hours=_float(state_cfg.get("decay_hours"), 0.0),
-            max_topics=_int(state_cfg.get("max_topics"), 5),
-            default_skill_ttl=_int(active_cfg.get("default_skill_ttl"), 4),
-            default_lore_ttl=_int(active_cfg.get("default_lore_ttl"), 2),
-            default_narrative_ttl=_int(active_cfg.get("default_narrative_ttl"), 6),
-            strength_decay_per_turn=_float(
-                active_cfg.get("strength_decay_per_turn"), 0.2
+            router_use_llm=coerce_bool(
+                router_cfg.get("use_llm"), False, warnings, "router.use_llm"
             ),
-            min_strength=_float(active_cfg.get("min_strength"), 0.3),
-            content_cache_max_entries=_int(cache_cfg.get("max_entries"), 50),
+            router_llm_timeout=coerce_float(
+                router_cfg.get("llm_timeout_seconds"),
+                3.0,
+                warnings,
+                "router.llm_timeout_seconds",
+            ),
+            router_fallback_to_keyword=coerce_bool(
+                router_cfg.get("fallback_to_keyword"),
+                True,
+                warnings,
+                "router.fallback_to_keyword",
+            ),
+            router_cache_enabled=coerce_bool(
+                router_cfg.get("cache_enabled"),
+                True,
+                warnings,
+                "router.cache_enabled",
+            ),
+            persist_state=coerce_bool(
+                state_cfg.get("persist"), True, warnings, "state.persist"
+            ),
+            state_use_llm=coerce_bool(
+                state_cfg.get("use_llm"), False, warnings, "state.use_llm"
+            ),
+            decay_hours=coerce_float(
+                state_cfg.get("decay_hours"), 0.0, warnings, "state.decay_hours"
+            ),
+            max_topics=coerce_int(
+                state_cfg.get("max_topics"), 5, warnings, "state.max_topics"
+            ),
+            default_skill_ttl=coerce_int(
+                active_cfg.get("default_skill_ttl"),
+                4,
+                warnings,
+                "active_context.default_skill_ttl",
+            ),
+            default_lore_ttl=coerce_int(
+                active_cfg.get("default_lore_ttl"),
+                2,
+                warnings,
+                "active_context.default_lore_ttl",
+            ),
+            default_narrative_ttl=coerce_int(
+                active_cfg.get("default_narrative_ttl"),
+                6,
+                warnings,
+                "active_context.default_narrative_ttl",
+            ),
+            strength_decay_per_turn=coerce_float(
+                active_cfg.get("strength_decay_per_turn"),
+                0.2,
+                warnings,
+                "active_context.strength_decay_per_turn",
+            ),
+            min_strength=coerce_float(
+                active_cfg.get("min_strength"),
+                0.3,
+                warnings,
+                "active_context.min_strength",
+            ),
+            content_cache_max_entries=coerce_int(
+                cache_cfg.get("max_entries"),
+                50,
+                warnings,
+                "content_cache.max_entries",
+            ),
         )
 
     def is_session_enabled(self, session_id: str) -> bool:
@@ -167,11 +212,19 @@ class ProactiveConfig:
     sessions: tuple[str, ...] = ()
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any] | None) -> ProactiveConfig:
+    def from_dict(
+        cls,
+        data: dict[str, Any] | None,
+        warnings: list[str] | None = None,
+    ) -> ProactiveConfig:
         """从插件配置字典构建 ProactiveConfig，缺失字段使用默认值。
+
+        缺失（None）静默使用默认值；存在但无法转换的脏值会回退为默认值并在
+        `warnings` 中记录一条说明。数值项在回退后仍按各自的合法下限钳制。
 
         Args:
             data: _conf_schema.json 对应的配置字典，可为 None。
+            warnings: 告警收集列表，None 表示静默降级。
 
         Returns:
             填充好默认值的 ProactiveConfig。
@@ -179,50 +232,77 @@ class ProactiveConfig:
         data = data or {}
         cfg = data.get("proactive", {}) or {}
 
-        def _bool(value: Any, default: bool) -> bool:
-            """安全转 bool。"""
-            if isinstance(value, bool):
-                return value
-            if isinstance(value, str):
-                return value.strip().lower() in ("1", "true", "yes", "on")
-            return default
-
-        def _int(value: Any, default: int) -> int:
-            """安全转 int。"""
-            try:
-                return int(value)
-            except (TypeError, ValueError):
-                return default
-
-        def _float(value: Any, default: float) -> float:
-            """安全转 float。"""
-            try:
-                return float(value)
-            except (TypeError, ValueError):
-                return default
-
         sessions = cfg.get("sessions", []) or []
         if isinstance(sessions, str):
             sessions = [sessions]
 
         return cls(
-            enabled=_bool(cfg.get("enabled"), False),
+            enabled=coerce_bool(
+                cfg.get("enabled"), False, warnings, "proactive.enabled"
+            ),
             tick_interval_seconds=max(
-                _float(cfg.get("tick_interval_seconds"), 120.0), 10.0
+                coerce_float(
+                    cfg.get("tick_interval_seconds"),
+                    120.0,
+                    warnings,
+                    "proactive.tick_interval_seconds",
+                ),
+                10.0,
             ),
             min_contact_gap_minutes=max(
-                _int(cfg.get("min_contact_gap_minutes"), 30), 0
+                coerce_int(
+                    cfg.get("min_contact_gap_minutes"),
+                    30,
+                    warnings,
+                    "proactive.min_contact_gap_minutes",
+                ),
+                0,
             ),
             min_proactive_interval_minutes=max(
-                _int(cfg.get("min_proactive_interval_minutes"), 60), 0
+                coerce_int(
+                    cfg.get("min_proactive_interval_minutes"),
+                    60,
+                    warnings,
+                    "proactive.min_proactive_interval_minutes",
+                ),
+                0,
             ),
-            max_unanswered=max(_int(cfg.get("max_unanswered"), 4), 0),
-            max_per_day=max(_int(cfg.get("max_per_day"), 6), 0),
-            max_sends_per_tick=max(_int(cfg.get("max_sends_per_tick"), 1), 1),
-            silence_hours=max(_float(cfg.get("silence_hours"), 6.0), 0.0),
+            max_unanswered=max(
+                coerce_int(
+                    cfg.get("max_unanswered"), 4, warnings, "proactive.max_unanswered"
+                ),
+                0,
+            ),
+            max_per_day=max(
+                coerce_int(
+                    cfg.get("max_per_day"), 6, warnings, "proactive.max_per_day"
+                ),
+                0,
+            ),
+            max_sends_per_tick=max(
+                coerce_int(
+                    cfg.get("max_sends_per_tick"),
+                    1,
+                    warnings,
+                    "proactive.max_sends_per_tick",
+                ),
+                1,
+            ),
+            silence_hours=max(
+                coerce_float(
+                    cfg.get("silence_hours"), 6.0, warnings, "proactive.silence_hours"
+                ),
+                0.0,
+            ),
             quiet_hours=str(cfg.get("quiet_hours") or "1-7"),
             startup_grace_seconds=max(
-                _float(cfg.get("startup_grace_seconds"), 120.0), 0.0
+                coerce_float(
+                    cfg.get("startup_grace_seconds"),
+                    120.0,
+                    warnings,
+                    "proactive.startup_grace_seconds",
+                ),
+                0.0,
             ),
             sessions=tuple(str(s) for s in sessions if str(s).strip()),
         )

@@ -31,6 +31,10 @@ _ESCAPE_MAP = {
 }
 
 
+# 字符串形式的布尔真值（与插件原有配置解析保持一致，勿随意增减）
+_TRUE_WORDS = ("1", "true", "yes", "on")
+
+
 def strip_html_comments(text: str) -> str:
     """去除 HTML 注释（占位文件中用于标明作用的说明会被去掉）。"""
     return _HTML_COMMENT_RE.sub("", text)
@@ -64,6 +68,70 @@ def coerce_int(
         if warnings is not None:
             warnings.append(f"字段 {field} 不是整数（{value!r}），已回退为 {fallback}")
         return fallback
+
+
+def coerce_float(
+    value: Any,
+    fallback: float,
+    warnings: list[str] | None = None,
+    field: str = "",
+) -> float:
+    """把配置/元数据值转为 float，失败时降级为 fallback。
+
+    与 `coerce_int` 同一套约定：缺失（None）静默回退，脏值回退并告警。
+
+    Args:
+        value: 原始值，可为 None / 数字 / 字符串。
+        fallback: 转换失败时的回退值。
+        warnings: 告警收集列表，None 表示静默降级。
+        field: 告警中显示的字段标识。
+
+    Returns:
+        转换后的浮点数，或 fallback。
+    """
+    if value is None:
+        return fallback
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        if warnings is not None:
+            warnings.append(f"字段 {field} 不是数字（{value!r}），已回退为 {fallback}")
+        return fallback
+
+
+def coerce_bool(
+    value: Any,
+    fallback: bool,
+    warnings: list[str] | None = None,
+    field: str = "",
+) -> bool:
+    """把配置/元数据值转为 bool，无法判断时降级为 fallback。
+
+    语义（与插件原有的配置解析保持一致，勿随意更改）：
+    - 布尔值直接返回；
+    - 字符串一律映射为 True/False（真值表：1/true/yes/on），**不会**回退到
+      fallback —— 因此 `"maybe"` 得到 False 而不是默认值；
+    - 缺失（None）静默回退；
+    - 其它类型回退并告警。
+
+    Args:
+        value: 原始值。
+        fallback: 无法判断时的回退值。
+        warnings: 告警收集列表，None 表示静默降级。
+        field: 告警中显示的字段标识。
+
+    Returns:
+        转换后的布尔值，或 fallback。
+    """
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() in _TRUE_WORDS
+    if value is None:
+        return fallback
+    if warnings is not None:
+        warnings.append(f"字段 {field} 不是布尔值（{value!r}），已回退为 {fallback}")
+    return fallback
 
 
 def coerce_str_list(value: Any) -> list[str]:

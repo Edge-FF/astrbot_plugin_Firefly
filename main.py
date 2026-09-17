@@ -72,6 +72,8 @@ class FireflyPlugin(FireflyCommandMixin, star.Star):
         """
         super().__init__(context)
         self._config_dict: dict[str, Any] = config or {}
+        # 配置解析告警的去重记录：按来源名保存上次已记录的告警
+        self._config_warnings_logged: dict[str, tuple[str, ...]] = {}
 
         plugin_dir = Path(__file__).resolve().parent
         data_dir = star.StarTools.get_data_dir("astrbot_plugin_Firefly")
@@ -240,6 +242,23 @@ class FireflyPlugin(FireflyCommandMixin, star.Star):
         """
         await self._injector.on_agent_begin(event, run_context)
 
+    def _log_config_warnings(self, source: str, warnings: list[str]) -> None:
+        """记录配置解析告警（同一来源的同一批告警只报一次）。
+
+        getter 每轮注入都会被调用，若每次都记录会刷屏；配置被改动后告警内容
+        随之变化，会再次记录，因此不会漏掉后续的配置问题。
+
+        Args:
+            source: 配置来源标识（shell / proactive）。
+            warnings: 本次解析产生的告警。
+        """
+        current = tuple(warnings)
+        if self._config_warnings_logged.get(source) == current:
+            return
+        self._config_warnings_logged[source] = current
+        for message in warnings:
+            self.logger.warning(f"[认知外壳] 插件配置项有问题（{source}）：{message}")
+
     def _build_config_getter(self) -> Callable[[], ShellConfig]:
         """构造外壳配置获取函数（每次调用返回最新配置）。
 
@@ -248,7 +267,10 @@ class FireflyPlugin(FireflyCommandMixin, star.Star):
         """
 
         def getter() -> ShellConfig:
-            return ShellConfig.from_dict(self._config_dict)
+            warnings: list[str] = []
+            cfg = ShellConfig.from_dict(self._config_dict, warnings)
+            self._log_config_warnings("shell", warnings)
+            return cfg
 
         return getter
 
@@ -260,7 +282,10 @@ class FireflyPlugin(FireflyCommandMixin, star.Star):
         """
 
         def getter() -> ProactiveConfig:
-            return ProactiveConfig.from_dict(self._config_dict)
+            warnings: list[str] = []
+            cfg = ProactiveConfig.from_dict(self._config_dict, warnings)
+            self._log_config_warnings("proactive", warnings)
+            return cfg
 
         return getter
 
