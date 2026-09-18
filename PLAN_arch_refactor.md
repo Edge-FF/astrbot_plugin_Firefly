@@ -1,10 +1,59 @@
 # 架构重构计划
 
 > 适用版本：`astrbot_plugin_Firefly` v0.3.0
-> 文档状态：待执行
+> 文档状态：**P0–P6 已执行完毕**（下方「重构总览」为结果，其余章节保留原始方案与逐阶段记录）
 > 关联文档：`DESIGN_task_shell.md`、`PLAN_task_shell.md`、`DESIGN_ui_role_editor.md`、`PLAN_ui_role_editor.md`
 
 ---
+
+## 重构总览（P0–P6 结果）
+
+| 阶段 | 提交 | 一句话 |
+|---|---|---|
+| P0 | `f070490` `0e5c5ca` | 行为锚点（3 条）+ 架构护栏（5 条），并做双向灵敏度验证 |
+| P1 | 10 个 `fix:` 提交 | 修掉 3 个真缺陷（H1–H3）与 4 处静默失败（S1–S4），消除 4 处耦合 |
+| P2 | `d033823` `966f5be` `fd7999f` | 拆 `models.py`：`config.py` / `records.py` / `adapter/dto.py` |
+| P3 | `1e6b762` | `core/` 按业务域分包（12 个模块 → 5 个子包） |
+| P4 | `e678418` | `debug_api.py` 704 → 110 行；handler 按资源拆到 `adapter/api/` |
+| P5 | `307406a` | 装配收敛：闭包 2 → 1 次构造；`FireflyCore` 13 → 9 字段 |
+| P6 | `7c6e8d4` | README 目录结构同步 + 架构约束章节 + 全量检查 |
+
+**指标**
+
+| 指标 | 重构前 | 重构后 |
+|---|---|---|
+| `core/models.py` | 704 行 | **308 行**（拆出 config/records） |
+| `adapter/debug_api.py` | 704 行 | **110 行**（组合壳）+ 6 个资源模块 |
+| `main.py` | 362 行 | 375 行（含逐字段说明；无内联业务类） |
+| `core/` 结构 | 平铺 16 个文件 | 4 个中立基础 + 5 个业务域子包 |
+| 架构护栏 | 无 | **5 条可执行断言** |
+| 测试数 | 158 | **211** |
+| `core`/`adapter`/`main` 的 ruff | 干净 | 干净（全程零新增） |
+| `tests/` 既有债 | 11 lint + 8 格式文件 | **同左**（零新增，见 §7.4） |
+
+**行为等价性证据（重构期间用于证明"没夹带逻辑变更"）**
+
+| 阶段 | 证据 | 结果 |
+|---|---|---|
+| P0 | 锚点灵敏度 | 改 1 个字符 → 锚点失败；改坏护栏 → 逐条失败 |
+| P2 | 逐字节搬运 + DTO 黄金 | `config.py` 正文与旧 `models.py` 对应区间逐字节相同；DTO 输出重构前后逐字节一致 |
+| P3 | 逐文件 AST 比对（剥离 import/docstring） | 50 个文件中**唯一**差异是一个必须改的 mock 目标字符串 |
+| P4 | 路由表黄金 + 方法体逐字节 | 21 条路由路径/方法/顺序全一致；22 个 handler 与 `ok`/`error` 逐字节一致 |
+| P5 | 读取点统计 + 新护栏反向验证 | 4 个死字段确认无动态访问后移除；护栏能检出人为加回的死字段 |
+
+**收尾后仍开放的事项**
+
+| 事项 | 说明 | 建议 |
+|---|---|---|
+| §7.1 死配置决策 | 6 个配置项（`tier1_reserved`、`state.use_llm`、3 个默认 TTL、`get_default_ttl()`）用户可调但完全不生效 | 另立任务：建议接通 `tier1_reserved` 与 3 个 TTL、删除 `state.use_llm` |
+| §7.4 `tests/` 债 | 11 处 lint + 8 个未格式化文件（重构前即有） | 独立 `style:` 提交清理 |
+| X1 状态全量落盘 | 每次 `set()` 触发全会话 O(N) 阻塞写盘 | 另立任务评估防抖/增量 |
+| X5 `core` 别名遮蔽 | `adapter/commands.py` 的 `core = self._core` 与 `core` 包同名 | 改名 `firefly` 或直接用 `self._core` |
+| X6 `commands.py` 零测试 | P3 中该文件被脚本改坏而 211 个测试全绿 | 补命令层测试 |
+| 真实环境冒烟 | P4 之后的面板渲染与 P5 装配变更未在真实 AstrBot 中复验 | 重启 AstrBot，逐 Tab 确认 |
+
+---
+
 
 ## 1. 背景与目标
 
@@ -811,6 +860,30 @@ tier 统计（`initialize:189-196`）保持内联——一次性日志格式化�
 - 全量测试
 - 真实环境冒烟（§6.5）
 
+#### ✅ P6 执行结果（已完成）
+
+| 项 | 结果 |
+|---|---|
+| P6-1 | `README.md` 的「目录结构」章节按实际结构重写（含 `core/` 5 个子包、`adapter/api/` 6 个资源模块） |
+| P6-2 | 新增「架构约束（贡献代码前必读）」章节：**5 条规则** + 新增功能的落位方式 + 改完必跑的自检命令 |
+| P6-3 | 全量检查完成，明细见下 |
+| 提交 | `7c6e8d4 docs: sync readme structure and add architecture constraints` |
+
+**P6-3 全量检查明细**
+
+| 检查 | 结果 |
+|---|---|
+| `ruff check core adapter main.py` | **All checks passed** |
+| `ruff format --check core adapter main.py` | **41 files already formatted** |
+| `ruff check core adapter main.py tests` | 11 处告警，**全部为重构前既有债**（清单与 §2.3 完全一致，零新增） |
+| `ruff format --check tests` | 8 个文件，**与基线同集**（零新增） |
+| 全量测试 | `Ran 211 tests — OK` |
+| 最终导入冒烟 | `core` 16 个子模块 + `adapter` 16 个子模块 + 插件主模块全部导入成功；两处 AstrBot 内部 API 可用；`DebugApi` 组合关系、tier 推断优先级、`FireflyCore` 9 字段等结构断言通过 |
+
+> P6-2 实际写入了 **5 条**规则而非计划中的 3 条：多出的两条是
+> 「`__init__.py` 只写 docstring」（P0 补充）与「`FireflyCore` 无死字段」（P5 补充）。
+> 它们都已被 `tests/test_architecture.py` 固化为可执行断言，README 与之一一对应。
+
 ---
 
 ## 6. 防回归机制（核心）
@@ -1021,6 +1094,9 @@ tier 统计（`initialize:189-196`）保持内联——一次性日志格式化�
 - [x] **P4 冒烟** —— 路由表黄金比对 21/21 一致 + 方法体逐字节等价 + 9 个子模块导入成功；面板 6 个 Tab 的人工验证待执行
 - [x] **P5** 装配收敛；`307406a`
 - [x] **P5 冒烟** —— 211 测试 + 护栏 5 条（含新增规则 5）+ `main.py` 分支审计；真实 AstrBot 启动待人工确认
-- [ ] **P6** 文档更新 + 全量检查；commit（`docs:`）
+- [x] **P6** README 目录结构 + 架构约束章节 + 全量检查；`7c6e8d4`
 - [ ] 另立任务：死配置处理（§7.1）
 - [ ] 另立任务：状态落盘策略（X1）
+- [ ] 另立任务：清理 `tests/` 既有 lint/格式债（§7.4 选项 C）
+- [ ] 另立任务：X5 `core` 别名改名 + X6 `commands.py` 测试覆盖
+- [ ] 人工：重启 AstrBot 逐 Tab 复验面板（P4/P5 之后的真实环境冒烟）
