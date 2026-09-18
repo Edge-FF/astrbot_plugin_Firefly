@@ -22,6 +22,7 @@
 - [数据存放位置](#数据存放位置)
 - [常见问题](#常见问题)
 - [目录结构](#目录结构)
+- [架构约束（贡献代码前必读）](#架构约束贡献代码前必读)
 
 ---
 
@@ -401,19 +402,49 @@ A：`role/` 是插件目录内的文件，随插件走；动态状态在 `data/p
 
 ```
 astrbot_plugin_Firefly/
-├── main.py                  # 插件入口与钩子注册
+├── main.py                  # 插件入口：装配 + 生命周期 + 钩子转发
 ├── metadata.yaml            # 插件元信息
 ├── _conf_schema.json        # 配置项定义
-├── core/                    # 纯逻辑（不依赖 AstrBot）
-│   ├── parsers.py           # front-matter 解析与规范化序列化
-│   ├── registry.py          # 资料索引与分层加载
-│   ├── role_store.py        # role/ 的路径校验、目录树与读写
-│   └── ...                  # 路由、情绪、外壳组装、动态状态
-├── adapter/                 # 与 AstrBot 对接
+├── core/                    # 纯逻辑层（不依赖 AstrBot，可脱离 AstrBot 运行与测试）
+│   ├── consts.py            # 领域常量
+│   ├── models.py            # 领域实体（资料、激活上下文、会话状态、报告）
+│   ├── config.py            # 运行配置与解析
+│   ├── records.py           # 调试记录数据
+│   ├── materials/           # 资料域：格式解析、层级规则、索引与读写
+│   │   ├── tier_rules.py    #   tier/kind 推断规则
+│   │   ├── parsers.py       #   front-matter 解析与规范化序列化
+│   │   ├── registry.py      #   资料索引与分层加载
+│   │   └── role_store.py    #   role/ 的路径校验、目录树与读写
+│   ├── cognition/           # 认知域：状态、情绪、激活惯性
+│   │   ├── state.py         #   会话动态状态存储
+│   │   ├── affect.py        #   情绪演化
+│   │   ├── context_manager.py  # 激活上下文的合并与衰减
+│   │   └── updaters.py      #   话题提取等通用更新
+│   ├── routing/             # 路由域
+│   │   └── router.py        #   LLM / 关键词 / 组合路由
+│   ├── shell/               # 外壳域：预算内组装
+│   │   ├── builder.py       #   文本组装
+│   │   └── assembly.py      #   组装编排
+│   └── proactive/           # 主动消息域
+│       └── policy.py        #   冲动模型与闸门策略
+├── adapter/                 # 对接层（唯一依赖 astrbot 的一层）
+│   ├── astrbot_compat.py    # AstrBot 内部 API 的唯一接触点（升级适配只改这里）
+│   ├── dto.py               # 记录 / 状态 → 面板字典
 │   ├── injector.py          # 注入流程
-│   ├── debug_api.py         # 调试面板接口
+│   ├── commands.py          # 命令入口
+│   ├── proactive_runner.py  # 主动消息后台循环
+│   ├── proactive_prompt.py  # 主动消息提示词拼装
+│   ├── debug_recorder.py    # 调试记录器
+│   ├── debug_api.py         # 调试面板 API 组合壳（路由编排）
 │   ├── role_api.py          # 资料管理接口（读 + 写）
-│   └── ...                  # 主动消息、命令
+│   └── api/                 # 调试面板路由（按资源拆分）
+│       ├── http.py          #   请求解析（HttpHelpers）与 ok / error
+│       ├── sessions.py      #   会话与状态
+│       ├── injections.py    #   注入记录
+│       ├── materials.py     #   资料浏览 / 重载
+│       ├── route.py         #   路由测试与注入预览
+│       ├── stats.py         #   配置 / 注册表摘要 / 统计
+│       └── proactive.py     #   主动消息状态与手动触发
 ├── role/                    # ⭐ 你的角色资料放这里
 │   ├── 基础人设.md
 │   ├── 故事/
@@ -425,5 +456,46 @@ astrbot_plugin_Firefly/
 │   ├── app.js               # Tab 壳
 │   ├── modules/             # DOM / Markdown / API 客户端
 │   └── views/               # 6 个 Tab 的视图模块
-└── tests/                   # 单元测试
+├── tests/                   # 单元测试
+│   ├── test_architecture.py      # 架构约束护栏（见下节）
+│   └── test_behavior_anchor.py   # 注入行为锚点（重构回归判据）
+├── PLAN_arch_refactor.md    # 架构重构计划与执行记录
+└── DESIGN_*.md / PLAN_*.md  # 其它功能的设计与计划
 ```
+
+---
+
+## 架构约束（贡献代码前必读）
+
+插件分两层：`core/` 是纯逻辑（不依赖 AstrBot，可脱离运行与单测），`adapter/` 负责与 AstrBot 对接。
+**边界由 `tests/test_architecture.py` 以可执行断言固化**，改动后会自动校验：
+
+| # | 规则 | 校验方式 |
+|---|---|---|
+| 1 | `core/**` 不得 `import astrbot` | AST 扫描 core 下全部文件的绝对导入 |
+| 2 | `core/` 各包的 `__init__.py` 只写 docstring，禁止 re-export | AST 检查 `__init__.py` 内无 import 语句 |
+| 3 | `adapter/` 与 `main.py` 中只有 `adapter/astrbot_compat.py` 可直接 `import astrbot.core.*` | AST 扫描导入的模块名 |
+| 4 | `core/` 内部模块依赖不得成环 | 解析相对/绝对导入构建依赖图后做环检测 |
+| 5 | `FireflyCore` 的每个字段都必须被读取 | AST 判定 `self._core.X` / `core.X` 访问链 |
+
+### 新增功能怎么放
+
+- **新业务域**（例如"后台日常模拟"）：新建 `core/<域>/`（纯逻辑、可单测）+
+  `adapter/<域>_runner.py`（定时循环、发送、记录），并在 `main.py` 的 `FireflyCore` 中登记**会被读取**的组件。
+- **新调试面板 Tab**：新建 `adapter/api/<资源>.py`，在 `adapter/debug_api.py` 的 `register_routes` 里加一行调用。
+- **禁止**把新功能追加到既有的大文件里；AstrBot 升级适配只改 `adapter/astrbot_compat.py`。
+
+### 改完必须自检
+
+```bash
+# ruff 会向上使用 AstrBot 根目录的 pyproject.toml，其 exclude 含 tests，因此必须显式传路径
+ruff check core adapter main.py tests
+ruff format --check core adapter main.py tests
+python -m unittest discover -s tests -t .
+```
+
+- `core` / `adapter` / `main.py` 必须零告警。
+- `tests/` 目前存在**重构前即有的** 11 处 lint 告警与 8 个未格式化文件（清单见
+  `PLAN_arch_refactor.md` §2.3 与 §7.4），与架构调整无关，尚未清理。
+- 涉及注入行为的改动会被 `tests/test_behavior_anchor.py` 以**逐字符比对**拦截；
+  若确为有意修改，需同步更新该文件的期望值，并在提交信息中注明「锚点已更新」。
