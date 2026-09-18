@@ -18,6 +18,7 @@
 | P5 | `307406a` | 装配收敛：闭包 2 → 1 次构造；`FireflyCore` 13 → 9 字段 |
 | P6 | `7c6e8d4` | README 目录结构同步 + 架构约束章节 + 全量检查 |
 | 追加 | `c4582c0` `5318edc` `98bcbe2` | §7.1 死配置：5 个接通 / 1 个删除（见 §7.1「执行结果」） |
+| 追加 | `22ff53f` `8052a59` | 主动消息两个"时间感知"缺陷：日配额跨天不重置、内部写入清零静默时长（见 §10） |
 
 **指标**
 
@@ -28,7 +29,7 @@
 | `main.py` | 362 行 | 375 行（含逐字段说明；无内联业务类） |
 | `core/` 结构 | 平铺 16 个文件 | 4 个中立基础 + 5 个业务域子包 |
 | 架构护栏 | 无 | **5 条可执行断言** |
-| 测试数 | 158 | **223** |
+| 测试数 | 158 | **235** |
 | 面板可调而无效的配置项 | 6 个 | **0 个** |
 | `core`/`adapter`/`main` 的 ruff | 干净 | 干净（全程零新增） |
 | `tests/` 既有债 | 11 lint + 8 格式文件 | **0**（`e6e7f26` 清零；另加 `ruff.toml` 使 `.` 覆盖 tests，见 `01cbdf1`） |
@@ -1186,3 +1187,115 @@ tier 统计（`initialize:189-196`）保持内联——一次性日志格式化�
 - [x] **§7.4 选项 B：新增自带 `ruff.toml`**（`.` 覆盖 tests + 修正包分类 + 钉住 target-version）；`01cbdf1`
 - [ ] 另立任务：X5 `core` 别名改名 + X6 `commands.py` 测试覆盖
 - [ ] 人工：重启 AstrBot 逐 Tab 复验面板，并按实测占用校准 `tier1_reserved`（§7.1）
+
+---
+
+## 10. 重构后发现并修复的缺陷（2026-09-18）
+
+**起因**：用户提出"系统不能保证 24 小时运行，定时/主动不能单纯依赖计时器，必须联系现实时间感知"。
+排查后确认：**主动性判定本身已是挂钟时间驱动（设计正确）**，但在同一区域发现**两个真实的"时间感知"缺陷**，均已修复。
+
+### 10.1 结论：主动性判定不是计时器驱动
+
+`ProactiveRunner._loop` 的 `asyncio.wait_for(..., timeout=interval)` **只决定"多久检查一次"**，
+所有判定每次都用 `now = time.time()` 重算，且依赖的时间戳全部持久化：
+
+| 判定 | 依据 | 跨重启/停机 |
+|---|---|---|
+| `idle_hours`（想念程度） | `now - 上次真实接触` | ✅ |
+| `silence_hours` | 同上 | ✅ |
+| `min_contact_gap` / `min_proactive_interval` | `now - 持久化时间戳` | ✅ |
+| `quiet_hours` | `datetime.fromtimestamp(now).hour`（本地时区） | ✅ |
+| 日配额跨天 | `day_key(now)` = 本地 `%Y-%m-%d` | ❌ 见 10.2 |
+| `startup_grace` | `now - plugin_start` | ✅（有意只针对本进程） |
+
+因此"机器关机 3 天再开机，少跑了 2000 个 tick"**不会**导致判定失准——第一次 tick 即可正确算出 72 小时静默。
+计时器只影响检查频率（分辨率），不影响正确性。
+
+### 10.2 缺陷 A：日配额跨天不重置 → 配额用尽即永久失效（`22ff53f`）
+
+**现象**：某天用满 `max_per_day`（默认 6）后，该会话的主动消息**永久不再发出**。
+
+**根因**：跨天重置只发生在「发送成功后」这一条路径上，而该路径被日配额闸门自己挡住：
+
+```
+policy.check_gates:   if state.proactive_count_today >= cfg.max_per_day:  # 只读计数，不看日期
+runner._after_send:   if not sent: return                                  # 唯一的写入点
+```
+
+于是：发满 6 条 → 次日闸门 `6 >= 6` 拦截 → 不发送 → `_after_send` 永不执行 → 计数永不重置 → 死锁。
+
+**与"非 24 小时运行"的关系**：跨午夜关机正是触发场景（关机前用满当日配额，开机后再也发不出）。
+
+**复现**（状态里日期为 `2020-01-01`、计数 6，修复前仍被拦）：
+
+```
+check_gates → allowed=False reason='daily_limit'
+状态里的 proactive_day='2020-01-01'（早于今天 30 天以上）
+```
+
+**修复**：把"跨天归零"从写入路径移到**读取路径**，并抽出具名函数作为唯一语义来源
+（闸门与面板展示共用，避免两处对"今天"的理解再次漂移）：
+
+```python
+def daily_count(state, now) -> int:
+    """返回该会话「今天」已发出的主动消息条数（跨天视为 0）。"""
+    if state.proactive_day == day_key(now):
+        return state.proactive_count_today
+    return 0
+```
+
+同时 `adapter/api/sessions.py` 的面板返回也改为 `daily_count(s, now)`——原来每次发送前看到的是
+已经跨天的旧计数，与判定不一致。
+
+**验证**：新增 7 个用例（同日达额须拦、同日未达额放行、跨天重置、空日期视为重置、`daily_count` 三种输入）；
+反向验证——去掉归一化后，恰好 4 个用例失败。
+
+### 10.3 缺陷 B：内部状态写入清零静默时长 → "越是想念越推迟发起"（`8052a59`）
+
+**现象**：长时间静默后（例如关机 3 天再开机），进入「想念」的**那一轮不会发出消息**，
+要再等约 `threshold / rate` 小时（「想念」档位 ≈ 1.25 小时）才可能发出。
+
+**根因**：`idle_hours` 用 `max(last_user_at, last_proactive_at, updated_at)` 作为"上次接触时间"，
+但 `updated_at` 是**状态自身的写入时间**。而 `_maybe_send` 在判定前会先写一次静默事件
+（进入「想念」），该写入把 `updated_at` 设为 `now`：
+
+```
+进入静默事件之前:  idle_hours = 72.00   urge = 72.00
+执行静默事件之后:  updated_at == now → idle_hours = 0.00   urge = 0.00
+                   should_reach_out → (False, 'recent_contact')
+```
+
+即"触发想念"这个动作把触发它所依据的静默时长清掉了。
+
+**这个缺陷是被 10.2 的端到端回归测试暴露的**——单测层面两个修复各自独立，只有端到端串起来才现形。
+
+**修复**：`_last_contact` 只统计**真实接触**（用户发言 / 她主动发出），不含 `updated_at`；
+两者都缺失时返回 0，由调用方按"从未接触"处理（idle 视为 0，不会误判成无限久）。
+
+**验证**：新增策略层 2 个用例（内部写入不得改变 idle、`min_contact_gap` 只由真实接触决定）
++ 运行器端到端 2 个用例（静默同一轮即可发起、跨天配额恢复）；反向验证——恢复 `updated_at` 后，
+恰好这 4 个用例失败。
+
+### 10.4 结论：定时任务不在本插件职责内
+
+插件内**没有**任何调度器（已 grep 确认无 `apscheduler` / `schedule`）。README 写明"定时任务"用的是
+AstrBot 自带的 `future_task` 工具，插件只在 cron 唤醒时通过 `on_agent_begin` 注入认知外壳
+（`consts.py` 靠 `PlatformMetadata(name="cron")` 与 `extras["cron_job"]` 识别任务路径）。
+
+所以**"停机后是否补发错过的定时任务"取决于 AstrBot 的 `future_task` 实现**，属主程序层，
+需在 AstrBot 源码单独排查（待办）。
+
+### 10.5 验证与待办
+
+| 项 | 结果 |
+|---|---|
+| 全量测试 | `Ran 235 tests — OK`（+4 相对本项工作开始前） |
+| ruff（`. ` 覆盖 tests） | `All checks passed` / `192 files already formatted` |
+| 两个复现脚本 | 修复后均显示恢复正常（`allowed=True reason='ok'`；`idle_hours=72.00`） |
+| 用户实例现状 | 检查 `cognitive_state.json`：尚无会话达到 `count >= max_per_day`，故未触发死锁；但有会话因 `unanswered_count=4 >= max_unanswered=4` 被有意拦截（用户回话即解除） |
+
+**待办**
+- [ ] AstrBot 层：确认 `future_task` 在停机/重启后是否补发错过的任务（§10.4）
+- [ ] 真实环境复验：重启 AstrBot，构造"昨天用满配额 → 次日"与"长时间静默"两个场景
+
