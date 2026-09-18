@@ -90,12 +90,6 @@
                 "default": true,
                 "hint": "关闭后动态状态仅保存在内存中，插件重启即重置。"
             },
-            "use_llm": {
-                "description": "是否启用 LLM 状态推断（关键词路由模式下的可选补充）",
-                "type": "bool",
-                "default": false,
-                "hint": "仅在路由降级到关键词时生效，LLM 路由模式下状态信号由路由阶段产出。"
-            },
             "decay_hours": {
                 "description": "硬性回落阈值（小时，0 表示关闭）",
                 "type": "float",

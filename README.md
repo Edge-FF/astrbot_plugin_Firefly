@@ -291,6 +291,7 @@ AstrBot 自带定时任务能力（内置的 `future_task` 工具），你可以
 | 配置 | 默认 | 说明 |
 |---|---|---|
 | `max_tokens` | `1500` | 外壳整体 token 预算 |
+| `tier1_reserved` | `830` | 常驻块（Tier1 人格 + 动态状态 + XML 包装）预留预算，这部分不参与按需资料的分配 |
 | `max_on_demand` | `5` | 单次最多激活几条按需资料 |
 | `enabled_sessions` | `[]` | 限定生效的会话（留空=全部生效） |
 
@@ -320,6 +321,10 @@ AstrBot 自带定时任务能力（内置的 `future_task` 工具），你可以
 | `default_narrative_ttl` | `6` | 叙事类保持轮数 |
 | `strength_decay_per_turn` | `0.2` | 每轮强度衰减 |
 | `min_strength` | `0.3` | 强度最低保留值 |
+
+> 三个 `default_*_ttl` 在**加载资料时**读取，因此改完配置需要重载一次资料
+> （面板「资料」页的重载按钮，或重启插件）才会作用于已有条目；
+> 资料文件 front-matter 里显式写的 `default_ttl` 始终优先于这三项。
 
 ### 主动消息 `proactive`
 

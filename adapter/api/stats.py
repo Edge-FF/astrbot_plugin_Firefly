@@ -31,7 +31,6 @@ class StatsRoutes(HttpHelpers):
                     "router_llm_timeout": c.router_llm_timeout,
                     "router_fallback_to_keyword": c.router_fallback_to_keyword,
                     "router_cache_enabled": c.router_cache_enabled,
-                    "state_use_llm": c.state_use_llm,
                     "decay_hours": c.decay_hours,
                     "max_topics": c.max_topics,
                     "default_skill_ttl": c.default_skill_ttl,

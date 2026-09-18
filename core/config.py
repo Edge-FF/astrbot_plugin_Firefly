@@ -36,7 +36,6 @@ class ShellConfig:
 
     # 状态
     persist_state: bool = True
-    state_use_llm: bool = False
     decay_hours: float = 0.0
     max_topics: int = 5
 
@@ -114,9 +113,6 @@ class ShellConfig:
             ),
             persist_state=coerce_bool(
                 state_cfg.get("persist"), True, warnings, "state.persist"
-            ),
-            state_use_llm=coerce_bool(
-                state_cfg.get("use_llm"), False, warnings, "state.use_llm"
             ),
             decay_hours=coerce_float(
                 state_cfg.get("decay_hours"), 0.0, warnings, "state.decay_hours"
