@@ -132,11 +132,10 @@ ruff format --check core adapter main.py tests
 
 ## 3. 隐患与耦合清单
 
-> **修复进度**：**H1 / H2 / H3、C1–C5、S1–S4 已在 P1–P2 修复**；
+> **修复进度**：**H1 / H2 / H3、C1–C6、S1–S4 已全部修复**；
 > **B1–B6 已由 P2–P4 解决**（`models.py` 704 → 308 行；`core/` 按子域分包；
-> `debug_api.py` 704 → 110 行并按资源拆分到 `adapter/api/`）。
-> 仍待处理：**C6**（P5-1）、**M1 / M2**（随 §7.1 决策）、
-> **X1–X6**（附带发现，另行处理；X5/X6 为 P3 期间新增，见 §3.5）。
+> `debug_api.py` 704 → 110 行并按资源拆分；`main.py` 装配收敛，`FireflyCore` 13 → 9 字段）。
+> 仅剩 **M1 / M2**（随 §7.1 的死配置决策）与 **X1–X6**（附带发现，另行处理）。
 > 下表保留原始记录，作为问题来源与修复依据。
 
 ### 3.1 P0 — 会产生错误结果的缺陷
@@ -731,6 +730,68 @@ P1-3 修复的反向依赖在分包后依然成立；所有边都朝 `consts` / 
 
 **P5 出口条件**：锚点测试不变；全部测试通过；`main.py` 无 `if/else` 业务分支（闸门除外，闸门在 injector 内）。
 
+#### ✅ P5 执行结果（已完成）
+
+| 项 | 结果 |
+|---|---|
+| 提交 | `307406a refactor: converge llm closure and drop unread FireflyCore fields` |
+| P5-1 | `_make_llm_generate` 由 **2 次构造 → 1 次**；同一实例供路由与主动消息共用 |
+| P5-2 | `FireflyCore` 由 **13 个字段 → 9 个**（删掉 4 个无读取点的死字段），并对保留字段逐条注明读取方 |
+| P5-3 | 审计确认 `main.py` 无业务策略分支（明细见下） |
+| 测试 | `Ran 211 tests — OK`（+1：新增架构规则 5） |
+| 指标 | `main.py` 377 → 375 行；`tests/` 债仍 11 lint + 8 格式（零新增） |
+
+**P5-1 的行为等价性说明**
+
+原实现有两处构造：`if cfg.router_use_llm` 内构造一次给路由，另在 `ProactiveRunner(...)` 处**无条件**再构造一次。
+`_make_llm_generate` 返回的是**无状态闭包**（仅捕获 `context`），因此合并为一次构造不改变行为。
+
+关键点是**保留"无条件"语义**：不能因为 `router_use_llm=false` 就把闭包置空——
+`ProactiveRunner` 用 `llm_generate is not None` 判定 `provider_ready`（`proactive_runner.py:119,253,376`），
+主动消息的文本生成与路由开关本是两件事。合并后的写法把这一意图直接写进了注释。
+
+**P5-2 的实际发现：4 个字段是死的**
+
+对 13 个字段逐个统计读取点（`self._core.X` / 命令层局部别名 `core.X`），发现
+`affect` / `assembly` / `policy` / `llm_generate` **零读取点**——它们只是被存进容器，
+真正消费方（`policy`、`ProactiveRunner`、`injector`）都在 `__init__` 内直接拿到了引用。
+
+已确认不存在动态访问（无 `getattr(self._core, ...)` / `vars()` / `dataclasses.fields`），
+因此删除是安全的。保留它们会让容器变成「看起来有依赖、实际没人用」的清单——
+与 §3.3.1 批评的死配置属于同一类问题，也与计划 P5-2「让谁依赖谁无需读 `__init__` 即可理解」的目标相悖：
+把死字段注释成「有依赖」只会误导。
+
+**新增架构规则 5（把这条边界固化下来）**
+
+`tests/test_architecture.py` 新增断言：`FireflyCore` 的每个字段都必须至少被生产代码
+（`adapter/` + `main.py`）读取一次。实现用 **AST 判定访问链**（`self._core.X` 与 `core.X`），
+避免文档字符串里出现同名字样被误判为「已读取」。
+
+反向验证：临时加入一个 `dead_field_probe` 字段 → 断言失败并报
+`Lists differ: ['dead_field_probe'] != []`，已还原。
+
+**P5-3 `main.py` 分支审计明细**
+
+| 位置 | 分支 | 判定 |
+|---|---|---|
+| `__init__:105` | `if cfg.router_use_llm` | 配置驱动的装配（是否构造 LLMRouter）——装配范畴 |
+| `initialize` | API 缺失告警、资料/状态加载告警、tier 统计日志 | 生命周期与诊断——无策略判断 |
+| `initialize:199` | `if proactive_config_getter().enabled` | 生命周期（配置开启才启动后台循环） |
+| `_make_llm_generate` | `try/except` + `provider is None` | LLM 访问接缝的基础设施容错 |
+| `_send_proactive_message` / `_register_*_api` | 能力守卫 | 降级保护，非业务策略 |
+| 三个 `handle_*` 钩子 | 纯转发 | 无逻辑 |
+
+结论：`main.py` 现为「装配 + 生命周期 + 钩子转发」，无业务策略分支。启动日志中的
+tier 统计（`initialize:189-196`）保持内联——一次性日志格式化，按 AGENTS.md 的
+「No Unnecessary Helpers」不宜为它单独抽函数。
+
+#### P5 对计划的一处偏离
+
+| 项 | 计划 | 实际 | 原因 |
+|---|---|---|---|
+| P5-2 | 仅「补充各字段的一行说明」 | 追加删除 4 个无读取点的死字段，并把该边界固化为架构规则 5 | 给死字段写说明会把容器文档变成误导；计划自身的目标是「让依赖关系一目了然」，删掉比注释更符合该目标 |
+
+
 ---
 
 ### P6 — 护栏与收尾
@@ -958,8 +1019,8 @@ P1-3 修复的反向依赖在分包后依然成立；所有边都朝 `consts` / 
 - [x] **P3 冒烟** —— 26 个子模块逐一导入成功 + 插件主模块导入成功 + 依赖图无环 + AST 等价性比对；真实 AstrBot 启动已由用户确认正常
 - [x] **P4** `adapter/api/` 拆分；`e678418`
 - [x] **P4 冒烟** —— 路由表黄金比对 21/21 一致 + 方法体逐字节等价 + 9 个子模块导入成功；面板 6 个 Tab 的人工验证待执行
-- [ ] **P5** 装配收敛；commit（`refactor:`）
-- [ ] **P5 冒烟**
+- [x] **P5** 装配收敛；`307406a`
+- [x] **P5 冒烟** —— 211 测试 + 护栏 5 条（含新增规则 5）+ `main.py` 分支审计；真实 AstrBot 启动待人工确认
 - [ ] **P6** 文档更新 + 全量检查；commit（`docs:`）
 - [ ] 另立任务：死配置处理（§7.1）
 - [ ] 另立任务：状态落盘策略（X1）
