@@ -17,6 +17,7 @@
 | P4 | `e678418` | `debug_api.py` 704 → 110 行；handler 按资源拆到 `adapter/api/` |
 | P5 | `307406a` | 装配收敛：闭包 2 → 1 次构造；`FireflyCore` 13 → 9 字段 |
 | P6 | `7c6e8d4` | README 目录结构同步 + 架构约束章节 + 全量检查 |
+| 追加 | `c4582c0` `5318edc` `98bcbe2` | §7.1 死配置：5 个接通 / 1 个删除（见 §7.1「执行结果」） |
 
 **指标**
 
@@ -27,9 +28,10 @@
 | `main.py` | 362 行 | 375 行（含逐字段说明；无内联业务类） |
 | `core/` 结构 | 平铺 16 个文件 | 4 个中立基础 + 5 个业务域子包 |
 | 架构护栏 | 无 | **5 条可执行断言** |
-| 测试数 | 158 | **211** |
+| 测试数 | 158 | **223** |
+| 面板可调而无效的配置项 | 6 个 | **0 个** |
 | `core`/`adapter`/`main` 的 ruff | 干净 | 干净（全程零新增） |
-| `tests/` 既有债 | 11 lint + 8 格式文件 | **同左**（零新增，见 §7.4） |
+| `tests/` 既有债 | 11 lint + 8 格式文件 | **10 lint + 8 格式文件**（零新增；1 处 F401 被新测试顺带消除，见 §7.4） |
 
 **行为等价性证据（重构期间用于证明"没夹带逻辑变更"）**
 
@@ -45,12 +47,12 @@
 
 | 事项 | 说明 | 建议 |
 |---|---|---|
-| §7.1 死配置决策 | 6 个配置项（`tier1_reserved`、`state.use_llm`、3 个默认 TTL、`get_default_ttl()`）用户可调但完全不生效 | 另立任务：建议接通 `tier1_reserved` 与 3 个 TTL、删除 `state.use_llm` |
-| §7.4 `tests/` 债 | 11 处 lint + 8 个未格式化文件（重构前即有） | 独立 `style:` 提交清理 |
+| ~~§7.1 死配置~~ | **已修复**（见 §7.1「执行结果」）：`tier1_reserved` 与 3 个默认 TTL 已接通，`state.use_llm` 已删除 | 无需后续任务 |
+| §7.4 `tests/` 债 | 10 处 lint + 8 个未格式化文件（重构前即有；接通 TTL 时顺带消掉 1 处 F401） | 独立 `style:` 提交清理 |
 | X1 状态全量落盘 | 每次 `set()` 触发全会话 O(N) 阻塞写盘 | 另立任务评估防抖/增量 |
 | X5 `core` 别名遮蔽 | `adapter/commands.py` 的 `core = self._core` 与 `core` 包同名 | 改名 `firefly` 或直接用 `self._core` |
 | X6 `commands.py` 零测试 | P3 中该文件被脚本改坏而 211 个测试全绿 | 补命令层测试 |
-| 真实环境冒烟 | P4 之后的面板渲染与 P5 装配变更未在真实 AstrBot 中复验 | 重启 AstrBot，逐 Tab 确认 |
+| 真实环境冒烟 | P4 之后的面板渲染、P5 装配变更、本轮配置接通均未在真实 AstrBot 中复验 | 重启 AstrBot，逐 Tab 确认；并**核对 `tier1_reserved` 取值**（见 §7.1） |
 
 ---
 
@@ -183,8 +185,9 @@ ruff format --check core adapter main.py tests
 
 > **修复进度**：**H1 / H2 / H3、C1–C6、S1–S4 已全部修复**；
 > **B1–B6 已由 P2–P4 解决**（`models.py` 704 → 308 行；`core/` 按子域分包；
-> `debug_api.py` 704 → 110 行并按资源拆分；`main.py` 装配收敛，`FireflyCore` 13 → 9 字段）。
-> 仅剩 **M1 / M2**（随 §7.1 的死配置决策）与 **X1–X6**（附带发现，另行处理）。
+> `debug_api.py` 704 → 110 行并按资源拆分；`main.py` 装配收敛，`FireflyCore` 13 → 9 字段）；
+> **§3.3.1 的 6 个死配置已全部处理**（5 个接通 / 1 个删除，见 §7.1「执行结果」）。
+> 仅剩 **M2**（中文 token 估算系数在多处重复）与 **X1–X6**（附带发现，另行处理）。
 > 下表保留原始记录，作为问题来源与修复依据。
 
 ### 3.1 P0 — 会产生错误结果的缺陷
@@ -992,6 +995,46 @@ tier 统计（`initialize:189-196`）保持内联——一次性日志格式化�
 
 > 该决策改变用户可见行为，**不放进本次重构**。执行 P6 后另立任务。
 
+#### ✅ §7.1 执行结果（已完成）
+
+按上述建议全部实施，分 3 个提交：
+
+| 提交 | 内容 |
+|---|---|
+| `c4582c0` | `fix: wire tier1_reserved into the shell token budget` |
+| `5318edc` | `fix: wire active context default ttls into material loading` |
+| `98bcbe2` | `fix: remove the unimplemented state.use_llm switch` |
+
+**接通细节**
+
+| 项 | 接线方式 |
+|---|---|
+| `inject.tier1_reserved` | `ShellBuilder(max_tokens, tier1_reserved)` → `_build_active` 用它替换硬编码 `830`（消除 M1）。schema/字段默认值同步 600 → **830**，取值与接通前一致 |
+| 三个 `default_*_ttl` | `MaterialRegistry(default_ttl_lookup=...)` → 每次 `load()` 重新查询一次，因此改配置后**重载资料即可生效**；未注入查询函数时沿用 `consts.DEFAULT_TTL_MAP` |
+| `ShellConfig.get_default_ttl()` | 接通为上述查询的实现，并改用 `consts.KIND_*` 判定（原先用字符串字面量，改常量名会静默失效）；未知类型回退由 1 改为 `consts.DEFAULT_TTL_MAP.get(kind, 0)`，与注册表语义一致（`persona` 因此为 0） |
+| `state.use_llm` | 从 `_conf_schema.json`、`config.py`、`api/stats.py`、`commands.py` 移除；前端未引用该字段，删除无副作用 |
+
+**验证**：`Ran 223 tests — OK`（+12 测试）；`core`/`adapter`/`main.py` ruff 全通过；`tests/` 既有债 11 → **10**（新测试的返回类型注解用到了原先未使用的导入，顺带消掉 1 处 F401）；
+新增测试覆盖：预留量影响裁剪、负值钳制、TTL 覆盖优先级（front-matter 仍优先）、reload 后重新取值、未知类型不查询配置、默认值与内置映射一致。
+
+**⚠️ 对既有安装的行为影响（已实测确认）**
+
+`tier1_reserved` 接通后，**配置里已保存的值开始真实生效**。本例环境实测：
+
+| 项 | 值 |
+|---|---|
+| 已保存配置 | `max_tokens=2300`、`tier1_reserved=600` |
+| 接通前实际扣除 | 硬编码 `830` → 激活条目可用 **1470** |
+| 接通后实际扣除 | 配置值 `600` → 激活条目可用 **1700**（多了 230） |
+| 常驻块**实测占用** | 1807 字符 ≈ **903 token**（`role/` 86 条资料，Tier1 = `persona_base`） |
+
+即：`830` 与 `600` **都低于**实测占用（903），因此两者都会让「常驻 + 激活」有机会超过 `max_tokens`
+（表现为面板 `over_budget` 标记）。该实例更合适的取值约为 **900**。
+
+> 由于该值现在可调，升级后建议在插件配置页按自己的 `role/` 体量校准一次：
+> `tier1_reserved ≈ 常驻块实测 token`，可用面板「注入预览」的空会话结果估算。
+> 这里不代为修改运行时配置文件（`data/config/astrbot_plugin_Firefly_config.json`），由使用者决定。
+
 ### 7.2 `core/` 三层目录深度
 
 本计划采用 `core/<域>/<模块>.py`（两层）。若未来某个域内部再膨胀（如 `materials/` 超过 5 个文件），再考虑三层。**当前不预先建三层。**
@@ -1095,8 +1138,8 @@ tier 统计（`initialize:189-196`）保持内联——一次性日志格式化�
 - [x] **P5** 装配收敛；`307406a`
 - [x] **P5 冒烟** —— 211 测试 + 护栏 5 条（含新增规则 5）+ `main.py` 分支审计；真实 AstrBot 启动待人工确认
 - [x] **P6** README 目录结构 + 架构约束章节 + 全量检查；`7c6e8d4`
-- [ ] 另立任务：死配置处理（§7.1）
+- [x] **§7.1 死配置处理**：`tier1_reserved` / 3 个 TTL / `get_default_ttl()` 接通，`state.use_llm` 删除；`c4582c0` `5318edc` `98bcbe2`
 - [ ] 另立任务：状态落盘策略（X1）
-- [ ] 另立任务：清理 `tests/` 既有 lint/格式债（§7.4 选项 C）
+- [ ] 另立任务：清理 `tests/` 既有 lint/格式债（§7.4 选项 C，当前 10 处）
 - [ ] 另立任务：X5 `core` 别名改名 + X6 `commands.py` 测试覆盖
-- [ ] 人工：重启 AstrBot 逐 Tab 复验面板（P4/P5 之后的真实环境冒烟）
+- [ ] 人工：重启 AstrBot 逐 Tab 复验面板，并按实测占用校准 `tier1_reserved`（§7.1）
