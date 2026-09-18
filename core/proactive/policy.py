@@ -187,8 +187,13 @@ class ProactivePolicy:
             return False, "recent_proactive"
         if cfg.max_unanswered > 0 and state.unanswered_count >= cfg.max_unanswered:
             return False, "max_unanswered"
-        if cfg.max_per_day > 0 and state.proactive_count_today >= cfg.max_per_day:
-            return False, "daily_limit"
+        if cfg.max_per_day > 0:
+            # 按「今天」归一化（见 daily_count）：否则配额用尽后跨天仍会被拦下，
+            # 而计数只在「发送成功后」重置（runner._after_send），被拦下就永远
+            # 不会重置 → 该会话永久失效。系统非 24 小时运行时（跨午夜关机）
+            # 正是触发场景。
+            if daily_count(state, now) >= cfg.max_per_day:
+                return False, "daily_limit"
         if plugin_start and (now - plugin_start) < cfg.startup_grace_seconds:
             return False, "startup_grace"
 
@@ -273,3 +278,43 @@ def _local_hour(now: float) -> int:
         return datetime.fromtimestamp(now).hour
     except (OSError, OverflowError, ValueError):
         return -1
+
+
+def day_key(timestamp: float) -> str:
+    """把时间戳格式化为本地日期键（YYYY-MM-DD）。
+
+    用于日配额判定：跨天意味着配额重置，因此"今天"必须与状态里记录的
+    `proactive_day` 用同一套本地日期规则比较。
+
+    Args:
+        timestamp: 时间戳。
+
+    Returns:
+        日期字符串；转换失败时返回空串——空串与任何真实日期都不相等，
+        因而会被判为"不是今天"（即配额重置），这是安全方向。
+    """
+    try:
+        from datetime import datetime
+
+        return datetime.fromtimestamp(timestamp).strftime("%Y-%m-%d")
+    except (OSError, OverflowError, ValueError):
+        return ""
+
+
+def daily_count(state: SessionState, now: float) -> int:
+    """返回该会话「今天」已发出的主动消息条数（跨天视为 0）。
+
+    这是日配额的唯一语义来源，供闸门判定与面板展示共用。之所以抽成函数而不是
+    在两处各写一遍条件：此前闸门只看计数、不看日期，而计数只在发送成功后重置，
+    两者对"今天"的理解不一致，导致配额用尽后跨天永久失效。
+
+    Args:
+        state: 会话状态。
+        now: 当前时间戳。
+
+    Returns:
+        今天已发出的条数；记录的日期不是今天时为 0。
+    """
+    if state.proactive_day == day_key(now):
+        return state.proactive_count_today
+    return 0

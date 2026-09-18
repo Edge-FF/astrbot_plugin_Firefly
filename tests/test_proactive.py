@@ -12,6 +12,8 @@ from astrbot_plugin_Firefly.core.proactive.policy import (
     INTENT_MISS,
     INTENT_SHARE,
     ProactivePolicy,
+    daily_count,
+    day_key,
 )
 
 _HOUR = 3600.0
@@ -129,16 +131,46 @@ class TestProactivePolicy(unittest.TestCase):
         self.assertEqual(policy.check_gates(state, _NOW, 0.0)[1], "recent_proactive")
 
     def test_gate_max_unanswered_and_daily(self):
-        """验证未回复上限与每日上限。"""
+        """验证未回复上限与每日上限（同日计数才计入配额）。"""
         policy = ProactivePolicy(self.affect, _config(max_unanswered=3, max_per_day=2))
         self.assertEqual(
             policy.check_gates(self._state(unanswered_count=3), _NOW, 0.0)[1],
             "max_unanswered",
         )
         self.assertEqual(
-            policy.check_gates(self._state(proactive_count_today=2), _NOW, 0.0)[1],
+            policy.check_gates(
+                self._state(proactive_day=day_key(_NOW), proactive_count_today=2),
+                _NOW,
+                0.0,
+            )[1],
             "daily_limit",
         )
+
+    def test_daily_limit_passes_below_quota(self):
+        """同日计数未达上限时应放行。"""
+        policy = ProactivePolicy(self.affect, _config(max_per_day=2))
+        state = self._state(proactive_day=day_key(_NOW), proactive_count_today=1)
+        self.assertEqual(policy.check_gates(state, _NOW, 0.0)[1], "ok")
+
+    def test_daily_limit_resets_after_day_rollover(self):
+        """跨天后日配额必须重置（回归用例）。
+
+        触发场景：系统非 24 小时运行，昨天用满配额后关机，今天开机。
+        计数只在「发送成功后」重置，而发送又被本闸门拦下——所以闸门必须自己看日期，
+        否则该会话的主动消息会永久失效。
+        """
+        policy = ProactivePolicy(self.affect, _config(max_per_day=2))
+        state = self._state(
+            proactive_day=day_key(_NOW - 24 * _HOUR),
+            proactive_count_today=2,  # 昨天已用尽
+        )
+        self.assertEqual(policy.check_gates(state, _NOW, 0.0)[1], "ok")
+
+    def test_daily_limit_treats_empty_day_as_reset(self):
+        """proactive_day 为空（首次运行或旧状态文件）时视为未计数。"""
+        policy = ProactivePolicy(self.affect, _config(max_per_day=2))
+        state = self._state(proactive_day="", proactive_count_today=99)
+        self.assertEqual(policy.check_gates(state, _NOW, 0.0)[1], "ok")
 
     def test_gate_startup_grace(self):
         """验证启动宽限期内不发。"""
@@ -187,6 +219,35 @@ class TestProactivePolicy(unittest.TestCase):
             ),
             INTENT_SHARE,
         )
+
+
+class TestDailyCount(unittest.TestCase):
+    """`daily_count`：日配额的唯一语义来源（闸门与面板共用）。"""
+
+    def test_same_day_returns_stored_count(self):
+        """记录日期就是今天时返回存储计数。"""
+        state = SessionState(
+            session_id="s1", proactive_day=day_key(_NOW), proactive_count_today=3
+        )
+        self.assertEqual(daily_count(state, _NOW), 3)
+
+    def test_other_day_returns_zero(self):
+        """记录日期不是今天时视为 0（跨天配额重置）。"""
+        state = SessionState(
+            session_id="s1",
+            proactive_day=day_key(_NOW - 24 * _HOUR),
+            proactive_count_today=3,
+        )
+        self.assertEqual(daily_count(state, _NOW), 0)
+
+    def test_empty_day_returns_zero(self):
+        """空日期（首次运行/旧状态）视为 0，不会把旧计数当今天。"""
+        state = SessionState(session_id="s1", proactive_day="", proactive_count_today=3)
+        self.assertEqual(daily_count(state, _NOW), 0)
+
+    def test_day_key_is_local_date(self):
+        """日期键为本地日期字符串（YYYY-MM-DD）。"""
+        self.assertRegex(day_key(_NOW), r"^\d{4}-\d{2}-\d{2}$")
 
 
 if __name__ == "__main__":

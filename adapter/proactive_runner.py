@@ -13,7 +13,6 @@ import asyncio
 import time
 import uuid
 from collections.abc import Awaitable, Callable
-from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
 from ..core.cognition.affect import (
@@ -25,7 +24,7 @@ from ..core.cognition.affect import (
 )
 from ..core.config import ProactiveConfig, ShellConfig
 from ..core.models import SessionState
-from ..core.proactive.policy import ProactivePolicy
+from ..core.proactive.policy import ProactivePolicy, day_key
 from ..core.records import ProactiveRecord
 from .proactive_prompt import build_intent_prompt
 
@@ -412,7 +411,7 @@ class ProactiveRunner:
         if not sent:
             return  # 未发出：不计数、不推进时间，保证下次可重试
 
-        day = _day_key(now)
+        day = day_key(now)
         fresh = await self._store.get(session_id)
         if fresh.last_proactive_at != state.last_proactive_at:
             # 期间已有其它主动消息写入，避免重复计数
@@ -521,18 +520,3 @@ class ProactiveRunner:
             )
         except Exception:
             pass
-
-
-def _day_key(timestamp: float) -> str:
-    """把时间戳格式化为日期键（YYYY-MM-DD）。
-
-    Args:
-        timestamp: 时间戳。
-
-    Returns:
-        日期字符串；转换失败时返回空串。
-    """
-    try:
-        return datetime.fromtimestamp(timestamp).strftime("%Y-%m-%d")
-    except (OSError, OverflowError, ValueError):
-        return ""

@@ -10,6 +10,7 @@ import time
 from typing import TYPE_CHECKING, Any
 
 from ...core.models import SessionState
+from ...core.proactive.policy import daily_count
 from .http import HttpHelpers, error, ok
 
 if TYPE_CHECKING:
@@ -171,6 +172,7 @@ class SessionRoutes(HttpHelpers):
             含激活上下文详情的扁平字典。
         """
         ac = s.active_context
+        now = time.time()
         return {
             "session_id": s.session_id,
             "mood": s.mood,
@@ -181,7 +183,9 @@ class SessionRoutes(HttpHelpers):
             "last_user_at": s.last_user_at,
             "last_proactive_at": s.last_proactive_at,
             "unanswered_count": s.unanswered_count,
-            "proactive_count_today": s.proactive_count_today,
+            # 按「今天」归一化后展示：与 ProactivePolicy.check_gates 的判定同源
+            # （daily_count），避免面板显示早已跨天的陈旧计数。
+            "proactive_count_today": daily_count(s, now),
             "proactive_day": s.proactive_day,
             "active_context": {
                 "turn_count": ac.turn_count,

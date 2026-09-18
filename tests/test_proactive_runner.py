@@ -19,7 +19,7 @@ from astrbot_plugin_Firefly.core.models import (
     BuildResult,
     SessionState,
 )
-from astrbot_plugin_Firefly.core.proactive.policy import ProactivePolicy
+from astrbot_plugin_Firefly.core.proactive.policy import ProactivePolicy, day_key
 
 _HOUR = 3600.0
 
@@ -115,6 +115,27 @@ class TestProactiveRunner(IsolatedAsyncioTestCase):
         self.assertGreater(state.last_proactive_at, 0.0)
         self.assertEqual(state.proactive_count_today, 1)
         self.assertEqual(self.recorder.count_proactive(), 1)
+
+    async def test_maybe_send_blocked_when_quota_used_today(self):
+        """同一天配额用尽时必须继续拦截（防打扰不能因修复而失效）。"""
+        runner = self._make_runner(config=_config(max_per_day=6))
+        now = time.time()
+        await self.store.set(
+            "s1",
+            SessionState(
+                session_id="s1",
+                proactive_day=day_key(now),  # 今天
+                proactive_count_today=6,  # 今天已用尽
+                last_user_at=now - 72 * 3600,
+                last_message_at=now - 72 * 3600,
+                updated_at=now - 72 * 3600,
+            ),
+        )
+        state = await self.store.get("s1")
+
+        sent = await runner._maybe_send("s1", state, now)
+
+        self.assertFalse(sent, "当天配额用尽仍应拦截")
 
     async def test_generation_failure_no_count(self):
         """验证生成失败时不发送、不计数。"""
