@@ -37,21 +37,21 @@ from .core.shell.builder import ShellBuilder
 
 @dataclass
 class FireflyCore:
-    """插件核心组件容器 v0.3。"""
+    """插件核心组件容器。
 
-    registry: MaterialRegistry
-    store: StateStore
-    affect: AffectEngine
-    router: ContextRouter
-    ctx_manager: ActiveContextManager
-    builder: ShellBuilder
-    assembly: ShellAssembly
-    policy: ProactivePolicy
-    config_getter: Callable[[], ShellConfig]
-    proactive_config_getter: Callable[[], ProactiveConfig]
-    proactive: ProactiveRunner
-    recorder: DebugRecorder | None = None
-    llm_generate: Callable | None = None
+    只登记**会被后续读取**的组件（读取点形如 `self._core.X` 或命令层的 `core.X`）。
+    纯中转对象不进此容器——否则容器会退化成一个「看起来有依赖、实际没人用」的清单。
+    """
+
+    registry: MaterialRegistry  # 资料索引（命令与面板读取）
+    store: StateStore  # 会话动态状态（命令、面板、主动消息读取）
+    router: ContextRouter  # 上下文路由（面板「路由测试」读取）
+    ctx_manager: ActiveContextManager  # 激活上下文管理器（面板状态读取）
+    builder: ShellBuilder  # 注入文本组装器（面板「注入预览」读取）
+    config_getter: Callable[[], ShellConfig]  # 外壳配置读取器（注入与面板共用）
+    proactive_config_getter: Callable[[], ProactiveConfig]  # 主动消息配置读取器
+    proactive: ProactiveRunner  # 主动消息执行器（命令与面板读取）
+    recorder: DebugRecorder | None = None  # 注入记录器（面板读取）
 
 
 @star.register(
@@ -98,9 +98,11 @@ class FireflyPlugin(FireflyCommandMixin, star.Star):
         affect = AffectEngine()
 
         llm_router: LLMRouter | None = None
-        llm_generate_fn = None
+        # LLM 文本生成闭包无状态，构造一次供路由与主动消息共用。
+        # 注意：不随 router_use_llm 开关置空——主动消息的文本生成与路由开关无关，
+        # 且 ProactiveRunner 以「llm_generate is not None」判定 provider_ready。
+        llm_generate_fn = self._make_llm_generate(context)
         if cfg.router_use_llm:
-            llm_generate_fn = self._make_llm_generate(context)
             llm_router = LLMRouter(
                 llm_generate=llm_generate_fn,
                 timeout=cfg.router_llm_timeout,
@@ -138,7 +140,7 @@ class FireflyPlugin(FireflyCommandMixin, star.Star):
             affect=affect,
             policy=policy,
             shell_config_getter=config_getter,
-            llm_generate=self._make_llm_generate(context),
+            llm_generate=llm_generate_fn,
             send_message=self._send_proactive_message,
             logger=self.logger,
             recorder=recorder,
@@ -148,17 +150,13 @@ class FireflyPlugin(FireflyCommandMixin, star.Star):
         self._core = FireflyCore(
             registry=registry,
             store=store,
-            affect=affect,
             router=router,
             ctx_manager=ctx_manager,
             builder=builder,
-            assembly=assembly,
-            policy=policy,
             config_getter=config_getter,
             proactive_config_getter=proactive_config_getter,
             proactive=proactive,
             recorder=recorder,
-            llm_generate=llm_generate_fn,
         )
 
         self._injector = CognitiveShellInjector(

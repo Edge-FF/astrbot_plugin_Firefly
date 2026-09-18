@@ -257,6 +257,74 @@ class TestCoreDependencyGraph(unittest.TestCase):
         )
 
 
+def _dataclass_field_names(path: Path, class_name: str) -> list[str]:
+    """取出指定 dataclass 的字段名（按声明顺序）。
+
+    Args:
+        path: 源码文件路径。
+        class_name: 目标类名。
+
+    Returns:
+        字段名列表；未找到该类时返回空列表。
+    """
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    for node in tree.body:
+        if isinstance(node, ast.ClassDef) and node.name == class_name:
+            return [
+                t.target.id
+                for t in node.body
+                if isinstance(t, ast.AnnAssign) and isinstance(t.target, ast.Name)
+            ]
+    return []
+
+
+def _container_attribute_reads(paths: list[Path]) -> set[str]:
+    """收集所有形如 `self._core.X` / `core.X` 的属性读取名。
+
+    用 AST 判定访问链，避免文档字符串里出现同名字样被误判为「已读取」。
+
+    Args:
+        paths: 待扫描的源码文件。
+
+    Returns:
+        被读取过的属性名集合。
+    """
+    reads: set[str] = set()
+    for path in paths:
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Attribute):
+                continue
+            value = node.value
+            if isinstance(value, ast.Name) and value.id == "core":
+                reads.add(node.attr)
+            elif isinstance(value, ast.Attribute) and value.attr == "_core":
+                reads.add(node.attr)
+    return reads
+
+
+class TestCoreContainerHasNoDeadFields(unittest.TestCase):
+    """规则 5：装配容器只登记会被读取的组件。"""
+
+    def test_every_core_field_is_read_in_production_code(self) -> None:
+        """FireflyCore 的每个字段都必须至少被生产代码读取一次。
+
+        否则容器会退化成「看起来有依赖、实际没人用」的清单，
+        与 §3.3.1 批评的死配置属于同一类问题。
+        """
+        fields = _dataclass_field_names(_MAIN_FILE, "FireflyCore")
+        self.assertTrue(fields, "未找到 FireflyCore 的字段定义")
+
+        reads = _container_attribute_reads([*_iter_py_files(_ADAPTER_DIR), _MAIN_FILE])
+        dead = [name for name in fields if name not in reads]
+        self.assertEqual(
+            dead,
+            [],
+            "FireflyCore 存在无人读取的死字段（接入使用或从容器移除）："
+            f"{dead}；已读取字段={sorted(reads)}",
+        )
+
+
 class TestAstrBotInternalApiIsolation(unittest.TestCase):
     """规则 3：AstrBot 内部 API 只能有一个接触点。"""
 
