@@ -31,7 +31,7 @@
 | 测试数 | 158 | **223** |
 | 面板可调而无效的配置项 | 6 个 | **0 个** |
 | `core`/`adapter`/`main` 的 ruff | 干净 | 干净（全程零新增） |
-| `tests/` 既有债 | 11 lint + 8 格式文件 | **10 lint + 8 格式文件**（零新增；1 处 F401 被新测试顺带消除，见 §7.4） |
+| `tests/` 既有债 | 11 lint + 8 格式文件 | **0**（已在 §7.4 的 `style:` 提交中清零） |
 
 **行为等价性证据（重构期间用于证明"没夹带逻辑变更"）**
 
@@ -48,7 +48,7 @@
 | 事项 | 说明 | 建议 |
 |---|---|---|
 | ~~§7.1 死配置~~ | **已修复**（见 §7.1「执行结果」）：`tier1_reserved` 与 3 个默认 TTL 已接通，`state.use_llm` 已删除 | 无需后续任务 |
-| §7.4 `tests/` 债 | 10 处 lint + 8 个未格式化文件（重构前即有；接通 TTL 时顺带消掉 1 处 F401） | 独立 `style:` 提交清理 |
+| ~~§7.4 `tests/` 债~~ | **已清零**（见 §7.4「执行结果」）：10 处 lint + 8 个格式文件，一次 `style:` 提交完成 | 无需后续任务 |
 | X1 状态全量落盘 | 每次 `set()` 触发全会话 O(N) 阻塞写盘 | 另立任务评估防抖/增量 |
 | X5 `core` 别名遮蔽 | `adapter/commands.py` 的 `core = self._core` 与 `core` 包同名 | 改名 `firefly` 或直接用 `self._core` |
 | X6 `commands.py` 零测试 | P3 中该文件被脚本改坏而 211 个测试全绿 | 补命令层测试 |
@@ -164,7 +164,7 @@ ruff check core adapter main.py tests
 ruff format --check core adapter main.py tests
 ```
 
-**当前 `tests/` 的既有 lint 债（11 处，与本次重构无关）**：
+**基线时 `tests/` 的既有 lint 债（11 处，与本次重构无关）**：
 
 | 文件 | 规则 | 数量 |
 |---|---|---|
@@ -175,7 +175,9 @@ ruff format --check core adapter main.py tests
 | `tests/test_proactive_runner.py` | `C408` ×1 | 1 |
 | `tests/test_matcher.py` | `F841` ×1 | 1 |
 
-> 处理方式见 §7.4。本次重构**只保证新增文件干净**，不顺手修改既有测试，避免污染 diff。
+> **该债已于 `e6e7f26` 全部清零**（连同 8 个未格式化文件）。清债过程中 `tests/test_loader.py`
+> 的 `F401` 先被 §7.1 的新测试顺带消除（11 → 10），其余 10 处 + 格式债在一次 `style:` 提交中处理，
+> 详见 §7.4。本次重构期间的原则是**只保证新增文件干净**，不顺手修改既有测试，避免污染各阶段 diff。
 
 **基线的意义**：`core` / `adapter` / `main.py` 当前是干净的，所以每个阶段之后这些目录出现的任何 ruff 告警都必然由该阶段引入，可直接作为自检信号。`tests/` 需用显式路径单独检查。
 
@@ -272,7 +274,7 @@ debug_recorder.py:56        ← 落盘 jsonl
 | **X1** | 每次状态写入触发全量落盘 | `core/state.py:69-79,101-125` | `set()` → `save()`，而 `save()` 序列化**所有会话**并用同步 `json.dump` 写盘。每次 LLM 请求产生 O(所有会话) 的阻塞磁盘 IO。会话数增长后成为瓶颈 |
 | **X2** | LLM 路由缓存无上限 | `core/router.py:87,180-188` | 缓存仅在命中时检查 60s TTL，过期条目不被主动清理。短时间高并发下会累积 |
 | **X3** | `_pending_signals` 按会话累积 | `adapter/injector.py:94` | 请求钩子写入、响应钩子消费。若响应钩子始终不触发，条目上限为会话数。影响很小，但无清理机制 |
-| **X4** | `tests/` 存在 11 处既有 lint 债，且默认 ruff 命令完全看不到 | §2.3 | 由 AstrBot 根 `pyproject.toml` 的 `exclude = [..., "tests"]` 导致。见 §7.4 |
+| **X4** | `tests/` 曾存在 11 处既有 lint 债，且默认 ruff 命令完全看不到 | §2.3 | 由 AstrBot 根 `pyproject.toml` 的 `exclude = [..., "tests"]` 导致。**已清零**（见 §7.4）；「默认命令看不到 tests」这一坑仍在，故 §6.3 与 README 均要求显式传路径 |
 | **X5** | 局部别名 `core = self._core` 与 `core` 包同名 | `adapter/commands.py:28,67,87,113,128` | 同一文件里 `core.registry` 是**属性访问**，而别处 `core.registry` 是**模块路径**，语义完全相反。P3 的改写脚本据此产出过误改（§5「P3 执行结果」）。建议把局部别名改为 `firefly` 或直接用 `self._core` |
 | **X6** | `adapter/commands.py` 无任何测试覆盖 | `tests/` | P3 中该文件被脚本改坏（`core.proactive` → `core.proactive.policy`），而**全量 210 个测试仍全部通过**。该文件的命令处理逻辑目前只靠真实环境人工验证，与「P1/P2 每个行为都有测试」的标准不一致 |
 
@@ -912,6 +914,9 @@ tier 统计（`initialize:189-196`）保持内联——一次性日志格式化�
 
 对 P2/P3/P4 这类纯移动，逐项确认：
 
+> 下表是**可复用的检查模板**（每次做纯移动型改动时逐项核对），不代表项目待办。
+> P2/P3/P4 执行时逐项做过核对；其中「锚点逐字符不变」在 P3 由全仓 AST 等价性比对加强替代。
+
 - [ ] `ruff check --select F401,F821,F811 core adapter main.py tests` 无未使用/未定义/重复定义
       （**必须显式传路径**；`.` 会跳过 `tests/`）
 - [ ] `grep -rn "core\.\(registry\|router\|affect\|state\|builder\|assembly\|models\|proactive\|role_store\|parsers\|updaters\|context_manager\)\b"` 无残留旧路径
@@ -1052,10 +1057,24 @@ tier 统计（`initialize:189-196`）保持内联——一次性日志格式化�
 |---|---|---|
 | **A. 保持现状 + 显式路径** | 文档化必须使用 `ruff check core adapter main.py tests` | 依赖执行者记得传路径；CI 若用 `.` 仍会漏 |
 | **B. 增加插件本地 `ruff.toml`** | 让插件自成一体，不再继承 AstrBot 根配置 | 需要在该文件里补齐根配置中插件实际用到的规则；若 AstrBot 后续调整规则，插件不再自动跟随 |
-| **C. 修复 `tests/` 的 11 处既有 lint 债** | 单独提交 `style: fix test lint` | 与重构无关的 diff 污染；但收益明确且风险为零 |
+| **C. 修复 `tests/` 的既有 lint 与格式债** | 单独提交 `style:` | 与重构无关的 diff；但收益明确且风险为零 |
 
-**建议**：先做 **C**（独立提交，不属于本重构），再评估 **B**。
-**当前**：本重构全程采用 **A**，且每个阶段只检查"本阶段新增/改动的文件"，不顺手修改既有测试。
+**决定**：采用 **A + C**。重构期间全程用显式路径（A），重构收尾后一次性清债（C）。
+**B 暂不做**：当前 AstrBot 根配置已够用，引入本地 `ruff.toml` 会带来"规则不再自动跟随上游"的长期维护成本。
+
+#### ✅ §7.4 执行结果：C 已完成
+
+| 项 | 结果 |
+|---|---|
+| 提交 | `e6e7f26 style: clear pre-existing lint and format debt in tests`（9 个文件，+196/−112） |
+| lint | 10 处全部修复：`C408` ×4（`dict()` → 字面量）、`I001` ×2（导入排序）、`F841` ×4（删除无用赋值，保留有副作用的调用） |
+| 格式 | 8 个未格式化文件一并 `ruff format` |
+| 验证 | `ruff check core adapter main.py tests` → **All checks passed**；`ruff format --check …` → **61 files already formatted**；`Ran 223 tests — OK` |
+| 语义等价 | 对**仅被格式化**的 2 个文件（`test_affect.py` / `test_state.py`）做 HEAD↔当前 `ast.dump` 比对，**完全相同**；其余 6 个文件因 lint 修复（删赋值 / `dict()`→字面量 / 导入重排）预期改变，已逐块人工审查 |
+
+> `tests/test_loader.py` 的 `F401` 在 §7.1 接通 TTL 时已被新测试的返回类型注解顺带消除（11 → 10），
+> 因此本项实际处理的是 10 处 lint + 8 个格式文件。
+> README 的「改完必须自检」一节已同步：三条命令现在应当**全部零告警/全绿**，不再有例外说明。
 
 ---
 
@@ -1140,6 +1159,6 @@ tier 统计（`initialize:189-196`）保持内联——一次性日志格式化�
 - [x] **P6** README 目录结构 + 架构约束章节 + 全量检查；`7c6e8d4`
 - [x] **§7.1 死配置处理**：`tier1_reserved` / 3 个 TTL / `get_default_ttl()` 接通，`state.use_llm` 删除；`c4582c0` `5318edc` `98bcbe2`
 - [ ] 另立任务：状态落盘策略（X1）
-- [ ] 另立任务：清理 `tests/` 既有 lint/格式债（§7.4 选项 C，当前 10 处）
+- [x] **§7.4 选项 C：清理 `tests/` 既有 lint/格式债**；`e6e7f26`
 - [ ] 另立任务：X5 `core` 别名改名 + X6 `commands.py` 测试覆盖
 - [ ] 人工：重启 AstrBot 逐 Tab 复验面板，并按实测占用校准 `tier1_reserved`（§7.1）
