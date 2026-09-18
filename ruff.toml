@@ -1,0 +1,34 @@
+# 本插件自带的 ruff 配置。
+#
+# 为什么需要它：插件位于 AstrBot 仓库内（data/plugins/），ruff 会向上使用 AstrBot 根
+# pyproject.toml；而那份配置的 exclude 含 "tests"，会让 `ruff check .` **静默跳过**
+# 本插件的 tests/ 目录（测试里有告警却报 All checks passed）。自带配置后，`.` 才是可信的。
+#
+# 下面的规则集镜像自 AstrBot 根 pyproject.toml 的 [tool.ruff] / [tool.ruff.lint]，
+# 迁移当时两边的检查结果完全一致；唯一差异是去掉了 exclude 中的 "tests"。
+# 上游若调整规则，本文件不会自动跟随，需要人工同步——这是自带配置的代价，
+# 换来的是「不依赖宿主仓库」的可移植性与确定的 target-version。
+
+line-length = 88
+# 插件声明支持 Python 3.10+。固定此项可避免宿主把 target-version 升到 3.11/3.12 后，
+# 静默放行 3.11+ 专有语法而破坏插件的兼容性承诺。
+target-version = "py310"
+
+[lint]
+select = [
+    "F",     # Pyflakes
+    "W",     # pycodestyle warnings
+    "E",     # pycodestyle errors
+    "ASYNC", # flake8-async
+    "C4",    # flake8-comprehensions
+    "Q",     # flake8-quotes
+    "I",     # import-order
+    "UP",    # pyupgrade
+]
+ignore = [
+    "F403",
+    "F405",
+    "E501",
+    "ASYNC230",
+    "ASYNC240",
+]

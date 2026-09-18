@@ -20,6 +20,9 @@ import unittest
 from pathlib import Path
 from unittest import IsolatedAsyncioTestCase
 
+from astrbot.api.provider import LLMResponse
+from astrbot.core.agent.message import Message
+from astrbot.core.provider.entities import ProviderRequest
 from astrbot_plugin_Firefly.adapter.debug_recorder import DebugRecorder
 from astrbot_plugin_Firefly.adapter.injector import CognitiveShellInjector
 from astrbot_plugin_Firefly.core.cognition.affect import AffectEngine
@@ -31,10 +34,6 @@ from astrbot_plugin_Firefly.core.models import SessionState
 from astrbot_plugin_Firefly.core.routing.router import KeywordRouter
 from astrbot_plugin_Firefly.core.shell.assembly import ShellAssembly
 from astrbot_plugin_Firefly.core.shell.builder import ShellBuilder
-
-from astrbot.api.provider import LLMResponse
-from astrbot.core.agent.message import Message
-from astrbot.core.provider.entities import ProviderRequest
 
 SESSION_ID = "anchor:s1"
 USER_MSG = "我有点难过，但我还能战斗"

@@ -8,6 +8,8 @@ import unittest
 from pathlib import Path
 from unittest import IsolatedAsyncioTestCase, mock
 
+from astrbot.core.agent.message import Message, TextPart
+from astrbot.core.provider.entities import ProviderRequest
 from astrbot_plugin_Firefly.adapter.injector import CognitiveShellInjector
 from astrbot_plugin_Firefly.core.cognition.affect import AffectEngine
 from astrbot_plugin_Firefly.core.cognition.context_manager import ActiveContextManager
@@ -20,9 +22,6 @@ from astrbot_plugin_Firefly.core.models import (
 )
 from astrbot_plugin_Firefly.core.shell.assembly import ShellAssembly
 from astrbot_plugin_Firefly.core.shell.builder import ShellBuilder
-
-from astrbot.core.agent.message import Message, TextPart
-from astrbot.core.provider.entities import ProviderRequest
 
 
 class _FakePlatformMeta:
