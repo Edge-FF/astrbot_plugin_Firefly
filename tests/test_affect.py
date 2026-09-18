@@ -58,9 +58,7 @@ class TestAffectEvents(unittest.TestCase):
 
     def test_user_emotion_is_reacted_not_copied(self):
         """核心：用户难过时她变成「心疼」，而非照抄用户情绪。"""
-        state = self.engine.apply(
-            self._state(), [AffectEvent(EVENT_DISTRESS)], now=0.0
-        )
+        state = self.engine.apply(self._state(), [AffectEvent(EVENT_DISTRESS)], now=0.0)
         self.assertEqual(state.mood, "心疼")
         self.assertNotEqual(state.mood, "难过")
 

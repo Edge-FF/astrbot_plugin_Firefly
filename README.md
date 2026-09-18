@@ -499,8 +499,6 @@ ruff format --check core adapter main.py tests
 python -m unittest discover -s tests -t .
 ```
 
-- `core` / `adapter` / `main.py` 必须零告警。
-- `tests/` 目前存在**重构前即有的** 11 处 lint 告警与 8 个未格式化文件（清单见
-  `PLAN_arch_refactor.md` §2.3 与 §7.4），与架构调整无关，尚未清理。
+- **以上三条命令必须全部零告警 / 全绿**（`tests/` 的既有 lint 与格式债已清理完毕，此后不应再新增）。
 - 涉及注入行为的改动会被 `tests/test_behavior_anchor.py` 以**逐字符比对**拦截；
   若确为有意修改，需同步更新该文件的期望值，并在提交信息中注明「锚点已更新」。

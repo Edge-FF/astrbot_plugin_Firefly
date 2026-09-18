@@ -27,7 +27,10 @@ _HOUR = 3600.0
 class _FakeAssembly:
     """固定返回外壳文本的假组装器。"""
 
-    def __init__(self, text: str = "<cognitive_shell>\n<dynamic_state>\n心情：想念\n</dynamic_state>\n</cognitive_shell>") -> None:
+    def __init__(
+        self,
+        text: str = "<cognitive_shell>\n<dynamic_state>\n心情：想念\n</dynamic_state>\n</cognitive_shell>",
+    ) -> None:
         """记录要返回的外壳文本。
 
         Args:
@@ -42,16 +45,16 @@ class _FakeAssembly:
 
 def _config(**kw) -> ProactiveConfig:
     """构造测试配置（默认放行全部节奏闸门）。"""
-    base = dict(
-        enabled=True,
-        tick_interval_seconds=60.0,
-        min_contact_gap_minutes=0,
-        min_proactive_interval_minutes=0,
-        max_unanswered=0,
-        max_per_day=0,
-        quiet_hours="0-0",
-        startup_grace_seconds=0.0,
-    )
+    base = {
+        "enabled": True,
+        "tick_interval_seconds": 60.0,
+        "min_contact_gap_minutes": 0,
+        "min_proactive_interval_minutes": 0,
+        "max_unanswered": 0,
+        "max_per_day": 0,
+        "quiet_hours": "0-0",
+        "startup_grace_seconds": 0.0,
+    }
     base.update(kw)
     return ProactiveConfig(**base)
 
@@ -81,6 +84,7 @@ class TestProactiveRunner(IsolatedAsyncioTestCase):
         Returns:
             组装好的 ProactiveRunner。
         """
+
         async def default_llm(system_prompt: str, user_prompt: str) -> str:
             return "在的，我一直都在。"
 
@@ -114,6 +118,7 @@ class TestProactiveRunner(IsolatedAsyncioTestCase):
 
     async def test_generation_failure_no_count(self):
         """验证生成失败时不发送、不计数。"""
+
         async def bad_llm(system_prompt: str, user_prompt: str) -> str:
             return ""
 
@@ -127,6 +132,7 @@ class TestProactiveRunner(IsolatedAsyncioTestCase):
 
     async def test_send_failure_no_count(self):
         """验证发送失败时不计数、不推进时间（可重试）。"""
+
         async def bad_send(session_id: str, text: str) -> None:
             raise RuntimeError("网络错误")
 
@@ -140,6 +146,7 @@ class TestProactiveRunner(IsolatedAsyncioTestCase):
 
     async def test_superseded_by_user_message(self):
         """验证生成期间用户插话会丢弃本次主动消息。"""
+
         async def llm_with_user_talk(system_prompt: str, user_prompt: str) -> str:
             # 模拟生成期间用户发言：更新 last_user_at
             fresh = await self.store.get("s1")
@@ -160,7 +167,9 @@ class TestProactiveRunner(IsolatedAsyncioTestCase):
         runner = self._make_runner(config=_config(enabled=False))
         await self.store.set(
             "s1",
-            SessionState(session_id="s1", mood="想念", last_user_at=time.time() - 10 * _HOUR),
+            SessionState(
+                session_id="s1", mood="想念", last_user_at=time.time() - 10 * _HOUR
+            ),
         )
         await runner._tick()
         state = await self.store.get("s1")
@@ -182,14 +191,19 @@ class TestProactiveRunner(IsolatedAsyncioTestCase):
 
     async def test_tick_isolates_session_failure(self):
         """验证单会话异常不影响其它会话。"""
+
         async def flaky_send(session_id: str, text: str) -> None:
             if session_id == "bad":
                 raise RuntimeError("该会话发送失败")
 
         runner = self._make_runner(sender=flaky_send)
         past = time.time() - 10 * _HOUR
-        await self.store.set("bad", SessionState(session_id="bad", mood="想念", last_user_at=past))
-        await self.store.set("ok", SessionState(session_id="ok", mood="想念", last_user_at=past))
+        await self.store.set(
+            "bad", SessionState(session_id="bad", mood="想念", last_user_at=past)
+        )
+        await self.store.set(
+            "ok", SessionState(session_id="ok", mood="想念", last_user_at=past)
+        )
         await runner._tick()
         self.assertEqual((await self.store.get("ok")).unanswered_count, 1)
         self.assertEqual((await self.store.get("bad")).unanswered_count, 0)
@@ -199,7 +213,9 @@ class TestProactiveRunner(IsolatedAsyncioTestCase):
         runner = self._make_runner(config=_config(max_unanswered=1))
         await self.store.set(
             "s1",
-            SessionState(session_id="s1", mood="想念", last_user_at=time.time() - 10 * _HOUR),
+            SessionState(
+                session_id="s1", mood="想念", last_user_at=time.time() - 10 * _HOUR
+            ),
         )
         await runner._tick()
         self.assertEqual((await self.store.get("s1")).unanswered_count, 1)
@@ -223,7 +239,9 @@ class TestProactiveRunner(IsolatedAsyncioTestCase):
         past = time.time() - 7 * _HOUR
         await self.store.set(
             "s1",
-            SessionState(session_id="s1", mood="平静", last_user_at=past, updated_at=past),
+            SessionState(
+                session_id="s1", mood="平静", last_user_at=past, updated_at=past
+            ),
         )
         await runner._tick()
         state = await self.store.get("s1")
@@ -234,7 +252,9 @@ class TestProactiveRunner(IsolatedAsyncioTestCase):
         runner = self._make_runner(shell_enabled=False)
         await self.store.set(
             "s1",
-            SessionState(session_id="s1", mood="想念", last_user_at=time.time() - 10 * _HOUR),
+            SessionState(
+                session_id="s1", mood="想念", last_user_at=time.time() - 10 * _HOUR
+            ),
         )
         await runner._tick()
         state = await self.store.get("s1")
@@ -244,10 +264,16 @@ class TestProactiveRunner(IsolatedAsyncioTestCase):
         """验证单次 tick 最多发送 max_sends_per_tick 条。"""
         runner = self._make_runner(config=_config(max_sends_per_tick=1))
         past = time.time() - 10 * _HOUR
-        await self.store.set("a", SessionState(session_id="a", mood="想念", last_user_at=past))
-        await self.store.set("b", SessionState(session_id="b", mood="想念", last_user_at=past))
+        await self.store.set(
+            "a", SessionState(session_id="a", mood="想念", last_user_at=past)
+        )
+        await self.store.set(
+            "b", SessionState(session_id="b", mood="想念", last_user_at=past)
+        )
         await runner._tick()
-        sent = sum(1 for s in (await self.store.all()).values() if s.unanswered_count > 0)
+        sent = sum(
+            1 for s in (await self.store.all()).values() if s.unanswered_count > 0
+        )
         self.assertEqual(sent, 1)
 
 

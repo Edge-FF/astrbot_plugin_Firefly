@@ -36,10 +36,11 @@ def _write_entry(role_dir: Path, rel_path: str, frontmatter: str, body: str) -> 
 def _run(coro):
     """同步运行 async 协程（适配不同事件循环环境）。"""
     try:
-        loop = asyncio.get_running_loop()
+        asyncio.get_running_loop()
     except RuntimeError:
         return asyncio.run(coro)
     import concurrent.futures
+
     with concurrent.futures.ThreadPoolExecutor() as pool:
         fut = pool.submit(asyncio.run, coro)
         return fut.result()
@@ -50,9 +51,12 @@ class TestKeywordRouter(unittest.TestCase):
         """构造关键词路由与临时资料库。"""
         self.router = KeywordRouter(max_entries=3)
         import tempfile
+
         self._tmp = tempfile.TemporaryDirectory()
         role_dir = Path(self._tmp.name)
-        _write_entry(role_dir, "persona_base.md", "tier: 1\nkind: persona", "核心人格内容")
+        _write_entry(
+            role_dir, "persona_base.md", "tier: 1\nkind: persona", "核心人格内容"
+        )
         _write_entry(
             role_dir,
             "skills/battle.md",
@@ -76,38 +80,46 @@ class TestKeywordRouter(unittest.TestCase):
 
     def test_keyword_match(self):
         """验证关键词命中条目。"""
-        result = _run(self.router.route(
-            "我们来战斗吧", SessionState(session_id="s1"), self.registry
-        ))
+        result = _run(
+            self.router.route(
+                "我们来战斗吧", SessionState(session_id="s1"), self.registry
+            )
+        )
         self.assertIn("battle", result.needed_ids)
         self.assertEqual(result.source, "keyword")
 
     def test_no_match(self):
         """验证无命中时返回空列表。"""
-        result = _run(self.router.route(
-            "今天天气不错", SessionState(session_id="s1"), self.registry
-        ))
+        result = _run(
+            self.router.route(
+                "今天天气不错", SessionState(session_id="s1"), self.registry
+            )
+        )
         self.assertEqual(result.needed_ids, [])
 
     def test_empty_text(self):
         """验证空文本不触发路由。"""
-        result = _run(self.router.route(
-            "", SessionState(session_id="s1"), self.registry
-        ))
+        result = _run(
+            self.router.route("", SessionState(session_id="s1"), self.registry)
+        )
         self.assertEqual(result.needed_ids, [])
 
     def test_sort_by_priority(self):
         """验证命中条目按优先级排序。"""
-        result = _run(self.router.route(
-            "战斗和甜点都很棒", SessionState(session_id="s1"), self.registry
-        ))
+        result = _run(
+            self.router.route(
+                "战斗和甜点都很棒", SessionState(session_id="s1"), self.registry
+            )
+        )
         self.assertEqual(result.needed_ids[0], "battle")
 
     def test_tier1_not_routed(self):
         """验证 Tier1/2 常驻资料不参与路由。"""
-        result = _run(self.router.route(
-            "核心人格内容", SessionState(session_id="s1"), self.registry
-        ))
+        result = _run(
+            self.router.route(
+                "核心人格内容", SessionState(session_id="s1"), self.registry
+            )
+        )
         self.assertNotIn("persona_base", result.needed_ids)
 
 
@@ -122,10 +134,13 @@ class TestLLMRouter(unittest.TestCase):
 
     def test_no_llm_generate_returns_none(self):
         """验证无生成函数时返回 None（触发降级）。"""
-        result = _run(self.router.route(
-            "测试", SessionState(session_id="s1"),
-            _make_empty_registry(),
-        ))
+        result = _run(
+            self.router.route(
+                "测试",
+                SessionState(session_id="s1"),
+                _make_empty_registry(),
+            )
+        )
         self.assertIsNone(result)
 
     def test_parse_valid_json(self):
@@ -197,6 +212,7 @@ class TestLLMRouter(unittest.TestCase):
 def _make_empty_registry() -> MaterialRegistry:
     """构造空资料库。"""
     import tempfile
+
     d = tempfile.TemporaryDirectory()
     r = MaterialRegistry(Path(d.name))
     r.load()
@@ -212,16 +228,22 @@ def _make_fake_registry(ids: list[str]) -> Any:
     Returns:
         假的注册表对象。
     """
+
     class _FakeRegistry:
         def all_entries(self):
             """返回构造的条目列表。"""
             return [
                 MaterialEntry(
-                    id=eid, title=eid, tier=3, kind="skill", source_path="<t>",
+                    id=eid,
+                    title=eid,
+                    tier=3,
+                    kind="skill",
+                    source_path="<t>",
                     content="test",
                 )
                 for eid in ids
             ]
+
     return _FakeRegistry()
 
 

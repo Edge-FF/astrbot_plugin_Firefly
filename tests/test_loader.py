@@ -14,8 +14,8 @@ from astrbot_plugin_Firefly.core.materials.parsers import (
     parse_frontmatter,
     strip_html_comments,
 )
-from astrbot_plugin_Firefly.core.models import MaterialEntry
 from astrbot_plugin_Firefly.core.materials.registry import MaterialRegistry
+from astrbot_plugin_Firefly.core.models import MaterialEntry
 
 
 def _write(role_dir: Path, rel: str, text: str) -> None:
@@ -63,7 +63,7 @@ enabled: true
 
     def test_quoted_scalar_strips_quotes_and_unescapes(self):
         """验证成对引号被剥离：含 : / # / 方括号的值不再被误解析。"""
-        text = '---\ntitle: "战斗: 技巧 #1"\nid: \'skill_a\'\n---\n正文。'
+        text = "---\ntitle: \"战斗: 技巧 #1\"\nid: 'skill_a'\n---\n正文。"
         meta, body = parse_frontmatter(text)
         self.assertEqual(meta["title"], "战斗: 技巧 #1")
         self.assertEqual(meta["id"], "skill_a")
@@ -93,7 +93,7 @@ enabled: true
 
     def test_list_quoted_items_with_comma(self):
         """验证列表元素支持引号，且引号内的逗号不参与切分。"""
-        text = '---\nkeywords: ["a,b", \'c\', d]\n---\n正文。'
+        text = "---\nkeywords: [\"a,b\", 'c', d]\n---\n正文。"
         meta, _ = parse_frontmatter(text)
         self.assertEqual(meta["keywords"], ["a,b", "c", "d"])
 
@@ -151,24 +151,28 @@ class TestMaterialRegistry(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             role_dir = Path(tmp)
             _write(
-                role_dir, "基础人设.md",
+                role_dir,
+                "基础人设.md",
                 "---\nid: persona_base\ntitle: 基础人设\n---\n我是流萤。",
             )
             _write(
-                role_dir, "故事/自我叙事.md",
+                role_dir,
+                "故事/自我叙事.md",
                 "---\nid: persona_narrative\n---\n叙事人格。",
             )
             _write(
-                role_dir, "技能/战斗.md",
+                role_dir,
+                "技能/战斗.md",
                 "---\nid: skill_battle\nkind: skill\nkeywords: [战斗]\npriority: 80\n---\n战斗说明。",
             )
             _write(
-                role_dir, "人物关系/卡芙卡.md",
+                role_dir,
+                "人物关系/卡芙卡.md",
                 "---\nid: kafka\ntitle: 卡芙卡\nkind: lore\ntags: [星核猎手]\n---\n卡芙卡资料。",
             )
 
             registry = MaterialRegistry(role_dir, cache_size=50)
-            report = registry.load()
+            registry.load()
 
             t1 = registry.get_tier(1)
             self.assertEqual(len(t1), 2)
@@ -186,11 +190,12 @@ class TestMaterialRegistry(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             role_dir = Path(tmp)
             _write(
-                role_dir, "技能/测试技能.md",
+                role_dir,
+                "技能/测试技能.md",
                 "---\nid: test_skill\nkind: skill\n---\n懒加载测试内容。",
             )
             registry = MaterialRegistry(role_dir)
-            report = registry.load()
+            registry.load()
 
             all_entries = registry.all_entries()
             skill = [e for e in all_entries if e.id == "test_skill"][0]
@@ -226,9 +231,11 @@ class TestMaterialRegistry(unittest.TestCase):
         """验证 front-matter 显式声明的 tier 覆盖自动推断。"""
         with tempfile.TemporaryDirectory() as tmp:
             role_dir = Path(tmp)
-            _write(role_dir, "custom/special.md", "---\ntier: 4\nkind: lore\n---\n内容。")
+            _write(
+                role_dir, "custom/special.md", "---\ntier: 4\nkind: lore\n---\n内容。"
+            )
             registry = MaterialRegistry(role_dir)
-            report = registry.load()
+            registry.load()
             entry = [e for e in registry.all_entries() if e.id == "special"][0]
             self.assertEqual(entry.tier, 4)
             self.assertEqual(entry.kind, "lore")
@@ -271,7 +278,11 @@ class TestMaterialRegistry(unittest.TestCase):
         """脏 front-matter 只降级 + 告警，不得中断整次加载。"""
         with tempfile.TemporaryDirectory() as tmp:
             role_dir = Path(tmp)
-            _write(role_dir, "技能/正常.md", "---\nid: ok_one\nkind: skill\n---\n正常内容。")
+            _write(
+                role_dir,
+                "技能/正常.md",
+                "---\nid: ok_one\nkind: skill\n---\n正常内容。",
+            )
             _write(
                 role_dir,
                 "技能/脏值.md",
@@ -286,7 +297,9 @@ class TestMaterialRegistry(unittest.TestCase):
             dirty = [e for e in registry.all_entries() if e.id == "dirty"][0]
             self.assertEqual(dirty.tier, consts.TIER_SKILL_LORE)
             self.assertEqual(dirty.priority, consts.DEFAULT_PRIORITY)
-            self.assertEqual(dirty.default_ttl, consts.DEFAULT_TTL_MAP[consts.KIND_SKILL])
+            self.assertEqual(
+                dirty.default_ttl, consts.DEFAULT_TTL_MAP[consts.KIND_SKILL]
+            )
             self.assertEqual(dirty.tags, ("战斗",))
             self.assertEqual(dirty.trigger_keywords, ("0",))
             self.assertTrue(any("不是整数" in w for w in report.warnings))
@@ -316,8 +329,16 @@ class TestMaterialRegistry(unittest.TestCase):
         """验证索引摘要包含条目 ID 与标签。"""
         with tempfile.TemporaryDirectory() as tmp:
             role_dir = Path(tmp)
-            _write(role_dir, "基础人设.md", "---\nid: persona_base\ntitle: 基础\ntags: [人格]\n---\n内容。")
-            _write(role_dir, "技能/s1.md", "---\nid: s1\ntitle: 技能1\ntags: [战斗, 星核猎手]\n---\n内容。")
+            _write(
+                role_dir,
+                "基础人设.md",
+                "---\nid: persona_base\ntitle: 基础\ntags: [人格]\n---\n内容。",
+            )
+            _write(
+                role_dir,
+                "技能/s1.md",
+                "---\nid: s1\ntitle: 技能1\ntags: [战斗, 星核猎手]\n---\n内容。",
+            )
             registry = MaterialRegistry(role_dir)
             registry.load()
             summary = registry.index_summary()
@@ -375,7 +396,8 @@ class TestMaterialRegistry(unittest.TestCase):
             role_dir = Path(tmp)
             for i in range(12):
                 _write(
-                    role_dir, f"技能/s{i}.md",
+                    role_dir,
+                    f"技能/s{i}.md",
                     f"---\nid: s{i}\n---\n内容{i}。",
                 )
             registry = MaterialRegistry(role_dir, cache_size=5)

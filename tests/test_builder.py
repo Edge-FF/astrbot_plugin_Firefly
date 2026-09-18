@@ -21,10 +21,14 @@ def _entry(**kwargs) -> MaterialEntry:
     Returns:
         构造好的条目。
     """
-    defaults = dict(
-        id="test", title="Test", tier=1, kind="persona",
-        source_path="<t>", content="默认内容",
-    )
+    defaults = {
+        "id": "test",
+        "title": "Test",
+        "tier": 1,
+        "kind": "persona",
+        "source_path": "<t>",
+        "content": "默认内容",
+    }
     defaults.update(kwargs)
     return MaterialEntry(**defaults)
 
@@ -41,7 +45,9 @@ class TestShellBuilder(unittest.TestCase):
 
     def test_build_all_layers(self):
         """验证组装结果包含各层块与激活条目。"""
-        tier1 = [_entry(id="persona_base", content="我是流萤。", tier=1, kind="persona")]
+        tier1 = [
+            _entry(id="persona_base", content="我是流萤。", tier=1, kind="persona")
+        ]
         active_ae = ActivatedEntry(entry_id="skill_x", remaining_ttl=3, strength=1.0)
         active_entry = _entry(id="skill_x", content="战斗说明。", tier=3, kind="skill")
 
@@ -62,7 +68,9 @@ class TestShellBuilder(unittest.TestCase):
         """验证弱激活条目带有背景参考标记。"""
         tier1 = [_entry(id="persona_base", content="我是流萤。", tier=1)]
         active_ae = ActivatedEntry(entry_id="skill_x", remaining_ttl=2, strength=0.3)
-        active_entry = _entry(id="skill_x", content="弱激活内容。", tier=3, kind="skill")
+        active_entry = _entry(
+            id="skill_x", content="弱激活内容。", tier=3, kind="skill"
+        )
 
         result = self.builder.build(
             tier1_entries=tier1,

@@ -59,7 +59,10 @@ class TestStateStore(IsolatedAsyncioTestCase):
             s.active_context = ActiveContext(
                 entries=[
                     ActivatedEntry(
-                        entry_id="skill_x", remaining_ttl=3, strength=0.8, activated_at_turn=1
+                        entry_id="skill_x",
+                        remaining_ttl=3,
+                        strength=0.8,
+                        activated_at_turn=1,
                     )
                 ],
                 turn_count=2,
@@ -77,19 +80,29 @@ class TestStateStore(IsolatedAsyncioTestCase):
         """验证旧状态文件中的关系/叙事遗留键被忽略，不崩溃。"""
         with tempfile.TemporaryDirectory() as tmp:
             data_file = Path(tmp) / "state.json"
-            data_file.write_text(json.dumps({
-                "s1": {
-                    "session_id": "s1",
-                    "mood": "难过",
-                    "relationship_stage": "friend",
-                    "relationship": "朋友",
-                    "relationship_note": "旧数据",
-                    "active_context": {"narrative_thread": "arc_01", "entries": [], "turn_count": 1},
-                    "recent_topics": [],
-                    "last_message_at": 1.0,
-                    "updated_at": 2.0,
-                }
-            }, ensure_ascii=False), encoding="utf-8")
+            data_file.write_text(
+                json.dumps(
+                    {
+                        "s1": {
+                            "session_id": "s1",
+                            "mood": "难过",
+                            "relationship_stage": "friend",
+                            "relationship": "朋友",
+                            "relationship_note": "旧数据",
+                            "active_context": {
+                                "narrative_thread": "arc_01",
+                                "entries": [],
+                                "turn_count": 1,
+                            },
+                            "recent_topics": [],
+                            "last_message_at": 1.0,
+                            "updated_at": 2.0,
+                        }
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
             store = StateStore(data_file)
             warnings = await store.load()
             self.assertEqual(warnings, [])

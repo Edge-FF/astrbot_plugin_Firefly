@@ -8,21 +8,22 @@ import unittest
 from pathlib import Path
 from unittest import IsolatedAsyncioTestCase, mock
 
-from astrbot.core.agent.message import Message, TextPart
-from astrbot.core.provider.entities import ProviderRequest
-
 from astrbot_plugin_Firefly.adapter.injector import CognitiveShellInjector
 from astrbot_plugin_Firefly.core.cognition.affect import AffectEngine
-from astrbot_plugin_Firefly.core.shell.assembly import ShellAssembly
-from astrbot_plugin_Firefly.core.shell.builder import ShellBuilder
-from astrbot_plugin_Firefly.core.config import ShellConfig
 from astrbot_plugin_Firefly.core.cognition.context_manager import ActiveContextManager
+from astrbot_plugin_Firefly.core.cognition.state import StateStore
+from astrbot_plugin_Firefly.core.config import ShellConfig
 from astrbot_plugin_Firefly.core.materials.registry import MaterialRegistry
 from astrbot_plugin_Firefly.core.models import (
     RouteResult,
     RouteSignals,
 )
-from astrbot_plugin_Firefly.core.cognition.state import StateStore
+from astrbot_plugin_Firefly.core.shell.assembly import ShellAssembly
+from astrbot_plugin_Firefly.core.shell.builder import ShellBuilder
+
+from astrbot.core.agent.message import Message, TextPart
+from astrbot.core.provider.entities import ProviderRequest
+
 
 class _FakePlatformMeta:
     """最简平台元数据（仅提供事件判定所需的 name）。"""
@@ -488,7 +489,9 @@ class TestCognitiveShellInjector(IsolatedAsyncioTestCase):
         """T1-6：已存在外壳标记时跳过（保险丝）。"""
         injector, _ = self._make_injector(ShellConfig())
         messages = [
-            Message(role="system", content="SYS <cognitive_shell>已有</cognitive_shell>")
+            Message(
+                role="system", content="SYS <cognitive_shell>已有</cognitive_shell>"
+            )
         ]
         before = messages[0].content
 

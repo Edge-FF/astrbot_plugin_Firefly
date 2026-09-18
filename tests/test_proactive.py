@@ -20,15 +20,15 @@ _NOW = 1_700_000_000.0
 
 def _config(**kw) -> ProactiveConfig:
     """构造测试用配置（默认全部启用且无时间限制）。"""
-    base = dict(
-        enabled=True,
-        min_contact_gap_minutes=0,
-        min_proactive_interval_minutes=0,
-        max_unanswered=0,
-        max_per_day=0,
-        quiet_hours="0-0",
-        startup_grace_seconds=0.0,
-    )
+    base = {
+        "enabled": True,
+        "min_contact_gap_minutes": 0,
+        "min_proactive_interval_minutes": 0,
+        "max_unanswered": 0,
+        "max_per_day": 0,
+        "quiet_hours": "0-0",
+        "startup_grace_seconds": 0.0,
+    }
     base.update(kw)
     return ProactiveConfig(**base)
 
@@ -42,7 +42,7 @@ class TestProactivePolicy(unittest.TestCase):
 
     def _state(self, **kw) -> SessionState:
         """构造会话状态。"""
-        base = dict(session_id="s1", mood="平静")
+        base = {"session_id": "s1", "mood": "平静"}
         base.update(kw)
         return SessionState(**base)
 
@@ -100,9 +100,7 @@ class TestProactivePolicy(unittest.TestCase):
         self.assertEqual(
             policy.check_gates(self._state(), _NOW, 0.0, hour=3)[1], "quiet_hours"
         )
-        self.assertEqual(
-            policy.check_gates(self._state(), _NOW, 0.0, hour=12)[1], "ok"
-        )
+        self.assertEqual(policy.check_gates(self._state(), _NOW, 0.0, hour=12)[1], "ok")
 
     def test_gate_quiet_hours_crossday(self):
         """验证跨天免打扰区间（23-6）。"""
@@ -132,9 +130,7 @@ class TestProactivePolicy(unittest.TestCase):
 
     def test_gate_max_unanswered_and_daily(self):
         """验证未回复上限与每日上限。"""
-        policy = ProactivePolicy(
-            self.affect, _config(max_unanswered=3, max_per_day=2)
-        )
+        policy = ProactivePolicy(self.affect, _config(max_unanswered=3, max_per_day=2))
         self.assertEqual(
             policy.check_gates(self._state(unanswered_count=3), _NOW, 0.0)[1],
             "max_unanswered",
@@ -146,9 +142,7 @@ class TestProactivePolicy(unittest.TestCase):
 
     def test_gate_startup_grace(self):
         """验证启动宽限期内不发。"""
-        policy = ProactivePolicy(
-            self.affect, _config(startup_grace_seconds=120.0)
-        )
+        policy = ProactivePolicy(self.affect, _config(startup_grace_seconds=120.0))
         self.assertEqual(
             policy.check_gates(self._state(), _NOW, _NOW - 10)[1], "startup_grace"
         )
