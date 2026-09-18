@@ -52,18 +52,24 @@ def _is_quiet_time(quiet_hours: str, hour: int) -> bool:
 
 
 def _last_contact(state: SessionState) -> float:
-    """最近一次接触的时间戳。
+    """最近一次「真实接触」的时间戳：用户发言或她主动发出。
 
-    取「用户发言 / 她主动 / 任何状态更新」三者最大值，保证只要会话有过互动，
-    静默时长就能被正确计算；从未互动时返回 0。
+    刻意**不**包含 `updated_at`——那是状态自身的写入时间。任何内部状态更新
+    （最典型的是长时间静默时写入「想念」）都会把它设为 now，从而把静默时长
+    清零：结果是「越是想念，越推迟发起」——静默事件会把自己该触发的那一次
+    拦在 `recent_contact` / `below_threshold` 上。实测 72 小时静默进入「想念」
+    后 idle 立即归零。
+
+    两个字段都缺失时返回 0，由调用方按「从未接触」处理（idle 视为 0，
+    不会误判成无限久没接触）。
 
     Args:
         state: 会话状态。
 
     Returns:
-        时间戳。
+        最近一次真实接触的时间戳；从未接触过时为 0。
     """
-    return max(state.last_user_at, state.last_proactive_at, state.updated_at)
+    return max(state.last_user_at, state.last_proactive_at)
 
 
 class ProactivePolicy:

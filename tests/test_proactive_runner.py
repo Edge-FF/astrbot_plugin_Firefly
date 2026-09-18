@@ -116,6 +116,59 @@ class TestProactiveRunner(IsolatedAsyncioTestCase):
         self.assertEqual(state.proactive_count_today, 1)
         self.assertEqual(self.recorder.count_proactive(), 1)
 
+    async def test_silence_event_does_not_block_first_reach_out(self):
+        """进入「想念」的同一轮就应能发出，不被自己的状态写入拦下（回归用例）。
+
+        静默事件会写 updated_at；若它被当成"接触时间"，idle 会在这一轮归零，
+        于是"越是想念越推迟发起"（实测 72h 静默 → idle 0 → below_threshold）。
+        """
+        runner = self._make_runner()
+        now = time.time()
+        await self.store.set(
+            "s1",
+            SessionState(
+                session_id="s1",
+                last_user_at=now - 72 * 3600,  # 超过默认 silence_hours=6
+                last_message_at=now - 72 * 3600,
+                updated_at=now - 72 * 3600,
+            ),
+        )
+        state = await self.store.get("s1")
+
+        sent = await runner._maybe_send("s1", state, now)
+
+        self.assertTrue(sent, "长时间静默后应能在同一轮发起")
+        after = await self.store.get("s1")
+        self.assertEqual(after.mood, "想念")
+        self.assertEqual(after.unanswered_count, 1)
+
+    async def test_maybe_send_recovers_after_day_rollover(self):
+        """跨天后即使昨天配额用尽，也应恢复发送（回归用例）。
+
+        复现"系统非 24 小时运行"场景：昨天用满 max_per_day 后关机，今天开机。
+        """
+        runner = self._make_runner(config=_config(max_per_day=6))
+        now = time.time()
+        await self.store.set(
+            "s1",
+            SessionState(
+                session_id="s1",
+                proactive_day=day_key(now - 86400),  # 昨天
+                proactive_count_today=6,  # 昨天已用尽
+                last_user_at=now - 72 * 3600,
+                last_message_at=now - 72 * 3600,
+                updated_at=now - 72 * 3600,
+            ),
+        )
+        state = await self.store.get("s1")
+
+        sent = await runner._maybe_send("s1", state, now)
+
+        self.assertTrue(sent, "跨天后应恢复发送能力")
+        after = await self.store.get("s1")
+        self.assertEqual(after.proactive_count_today, 1, "计数应从今天重新计")
+        self.assertEqual(after.proactive_day, day_key(now))
+
     async def test_maybe_send_blocked_when_quota_used_today(self):
         """同一天配额用尽时必须继续拦截（防打扰不能因修复而失效）。"""
         runner = self._make_runner(config=_config(max_per_day=6))

@@ -172,6 +172,34 @@ class TestProactivePolicy(unittest.TestCase):
         state = self._state(proactive_day="", proactive_count_today=99)
         self.assertEqual(policy.check_gates(state, _NOW, 0.0)[1], "ok")
 
+    def test_idle_hours_ignores_internal_state_write(self):
+        """内部状态写入不得清零静默时长（回归用例）。
+
+        静默事件会把 `updated_at` 写成 now。若 idle 把它算作"接触时间"，
+        就会在应当发起的那一轮把自己拦下（`recent_contact` / `below_threshold`），
+        形成"越是想念、越推迟发起"。
+        """
+        ten_hours_ago = _NOW - 10 * _HOUR
+        before = self._state(last_user_at=ten_hours_ago, updated_at=ten_hours_ago)
+        # 同一会话，仅 updated_at 被内部写入刷新为 now
+        after_write = self._state(last_user_at=ten_hours_ago, updated_at=_NOW)
+
+        self.assertAlmostEqual(
+            self.policy.idle_hours(after_write, _NOW),
+            self.policy.idle_hours(before, _NOW),
+            places=6,
+        )
+        self.assertAlmostEqual(
+            self.policy.idle_hours(after_write, _NOW), 10.0, places=6
+        )
+
+    def test_contact_gap_uses_real_contact_only(self):
+        """`min_contact_gap` 只由真实接触决定，内部写入不刷新它。"""
+        policy = ProactivePolicy(self.affect, _config(min_contact_gap_minutes=30))
+        long_ago = _NOW - 10 * _HOUR
+        state = self._state(last_user_at=long_ago, updated_at=_NOW)
+        self.assertEqual(policy.check_gates(state, _NOW, 0.0)[1], "ok")
+
     def test_gate_startup_grace(self):
         """验证启动宽限期内不发。"""
         policy = ProactivePolicy(self.affect, _config(startup_grace_seconds=120.0))
