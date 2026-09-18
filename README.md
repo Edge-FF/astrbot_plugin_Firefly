@@ -493,12 +493,14 @@ astrbot_plugin_Firefly/
 ### 改完必须自检
 
 ```bash
-# ruff 会向上使用 AstrBot 根目录的 pyproject.toml，其 exclude 含 tests，因此必须显式传路径
-ruff check core adapter main.py tests
-ruff format --check core adapter main.py tests
+ruff check .              # 依赖本目录的 ruff.toml，覆盖 core / adapter / tests
+ruff format --check .
 python -m unittest discover -s tests -t .
 ```
 
 - **以上三条命令必须全部零告警 / 全绿**（`tests/` 的既有 lint 与格式债已清理完毕，此后不应再新增）。
 - 涉及注入行为的改动会被 `tests/test_behavior_anchor.py` 以**逐字符比对**拦截；
   若确为有意修改，需同步更新该文件的期望值，并在提交信息中注明「锚点已更新」。
+- 本目录自带 `ruff.toml`：**不要删它**。没有它时 ruff 会向上使用 AstrBot 根 `pyproject.toml`，
+  而那份配置把 `tests` 排除在外，会让 `ruff check .` 跳过一个有告警的测试目录并报「All checks passed」。
+  该文件的规则集镜像自上游，若上游调整规则需人工同步（文件内已注明出处）。

@@ -31,7 +31,7 @@
 | 测试数 | 158 | **223** |
 | 面板可调而无效的配置项 | 6 个 | **0 个** |
 | `core`/`adapter`/`main` 的 ruff | 干净 | 干净（全程零新增） |
-| `tests/` 既有债 | 11 lint + 8 格式文件 | **0**（已在 §7.4 的 `style:` 提交中清零） |
+| `tests/` 既有债 | 11 lint + 8 格式文件 | **0**（`e6e7f26` 清零；另加 `ruff.toml` 使 `.` 覆盖 tests，见 `01cbdf1`） |
 
 **行为等价性证据（重构期间用于证明"没夹带逻辑变更"）**
 
@@ -143,7 +143,7 @@ proactive (→ affect)
 > `<venv>` = `F:\Python\AstrBot\.venv`。
 > 注意：`python.exe` 在 PATH 上指向 Windows Store 占位程序（无输出、不可用），必须使用项目 venv 或 `py` 启动器。
 
-#### ⚠️ ruff 作用域陷阱（实测确认）
+#### ⚠️ ruff 作用域陷阱（实测确认；**已由 `01cbdf1` 修复**）
 
 在插件目录下执行 `ruff check .` / `ruff format --check .` 时，ruff 会**向上发现 AstrBot 根目录的 `pyproject.toml`**
 （`file_resolver.project_root = F:\Python\AstrBot`），而该配置的 `file_resolver.exclude` 中包含 `"tests"`：
@@ -157,12 +157,11 @@ file_resolver.exclude = [
 ```
 
 **后果**：`. ` 形式的命令**完全跳过 `tests/`**，会在测试目录存在 lint / 格式问题时仍报 "All checks passed"。
-必须显式传路径才能覆盖测试：
+重构期间它误导过两次（先是给出了错误的「全绿」基线，后又掩盖了测试目录的真实状态）。
 
-```
-ruff check core adapter main.py tests
-ruff format --check core adapter main.py tests
-```
+**修复方式**：插件目录下增加自带 `ruff.toml`（`file_resolver.project_root` 随之变为插件目录），
+规则集镜像上游、去掉 `tests` 排除，此后 `ruff check .` 覆盖 192 个文件（含 20 个测试文件）。
+细节与代价见 §7.4。
 
 **基线时 `tests/` 的既有 lint 债（11 处，与本次重构无关）**：
 
@@ -179,7 +178,7 @@ ruff format --check core adapter main.py tests
 > 的 `F401` 先被 §7.1 的新测试顺带消除（11 → 10），其余 10 处 + 格式债在一次 `style:` 提交中处理，
 > 详见 §7.4。本次重构期间的原则是**只保证新增文件干净**，不顺手修改既有测试，避免污染各阶段 diff。
 
-**基线的意义**：`core` / `adapter` / `main.py` 当前是干净的，所以每个阶段之后这些目录出现的任何 ruff 告警都必然由该阶段引入，可直接作为自检信号。`tests/` 需用显式路径单独检查。
+**基线的意义**：`core` / `adapter` / `main.py` 当前是干净的，所以每个阶段之后这些目录出现的任何 ruff 告警都必然由该阶段引入，可直接作为自检信号。（`01cbdf1` 之前 `tests/` 需用显式路径单独检查；自带 `ruff.toml` 后 `.` 已覆盖全部，见 §7.4。）
 
 ---
 
@@ -274,7 +273,7 @@ debug_recorder.py:56        ← 落盘 jsonl
 | **X1** | 每次状态写入触发全量落盘 | `core/state.py:69-79,101-125` | `set()` → `save()`，而 `save()` 序列化**所有会话**并用同步 `json.dump` 写盘。每次 LLM 请求产生 O(所有会话) 的阻塞磁盘 IO。会话数增长后成为瓶颈 |
 | **X2** | LLM 路由缓存无上限 | `core/router.py:87,180-188` | 缓存仅在命中时检查 60s TTL，过期条目不被主动清理。短时间高并发下会累积 |
 | **X3** | `_pending_signals` 按会话累积 | `adapter/injector.py:94` | 请求钩子写入、响应钩子消费。若响应钩子始终不触发，条目上限为会话数。影响很小，但无清理机制 |
-| **X4** | `tests/` 曾存在 11 处既有 lint 债，且默认 ruff 命令完全看不到 | §2.3 | 由 AstrBot 根 `pyproject.toml` 的 `exclude = [..., "tests"]` 导致。**已清零**（见 §7.4）；「默认命令看不到 tests」这一坑仍在，故 §6.3 与 README 均要求显式传路径 |
+| **X4** | `tests/` 曾存在 11 处既有 lint 债，且默认 ruff 命令完全看不到 | §2.3 | 由 AstrBot 根 `pyproject.toml` 的 `exclude = [..., "tests"]` 导致。债**已清零**，且「默认命令看不到 tests」也已由自带 `ruff.toml` 根治（`01cbdf1`，见 §7.4） |
 | **X5** | 局部别名 `core = self._core` 与 `core` 包同名 | `adapter/commands.py:28,67,87,113,128` | 同一文件里 `core.registry` 是**属性访问**，而别处 `core.registry` 是**模块路径**，语义完全相反。P3 的改写脚本据此产出过误改（§5「P3 执行结果」）。建议把局部别名改为 `firefly` 或直接用 `self._core` |
 | **X6** | `adapter/commands.py` 无任何测试覆盖 | `tests/` | P3 中该文件被脚本改坏（`core.proactive` → `core.proactive.policy`），而**全量 210 个测试仍全部通过**。该文件的命令处理逻辑目前只靠真实环境人工验证，与「P1/P2 每个行为都有测试」的标准不一致 |
 
@@ -860,8 +859,8 @@ tier 统计（`initialize:189-196`）保持内联——一次性日志格式化�
   3. 新业务功能必须按"`core/<域>` + `adapter/<域>_runner`"形状落地，禁止追加到既有文件。
 
 #### P6-3 全量检查
-- `ruff check core adapter main.py tests`（**必须显式传路径**，`.` 会跳过 `tests/`，见 §2.3）
-- `ruff format --check core adapter main.py tests`
+- `ruff check .`（`01cbdf1` 之后 `.` 已覆盖 `tests/`；此前必须显式传路径，见 §2.3）
+- `ruff format --check .`
 - 全量测试
 - 真实环境冒烟（§6.5）
 
@@ -917,8 +916,8 @@ tier 统计（`initialize:189-196`）保持内联——一次性日志格式化�
 > 下表是**可复用的检查模板**（每次做纯移动型改动时逐项核对），不代表项目待办。
 > P2/P3/P4 执行时逐项做过核对；其中「锚点逐字符不变」在 P3 由全仓 AST 等价性比对加强替代。
 
-- [ ] `ruff check --select F401,F821,F811 core adapter main.py tests` 无未使用/未定义/重复定义
-      （**必须显式传路径**；`.` 会跳过 `tests/`）
+- [ ] `ruff check --select F401,F821,F811 .` 无未使用/未定义/重复定义
+      （插件目录的 `ruff.toml` 已让 `.` 覆盖 `tests/`）
 - [ ] `grep -rn "core\.\(registry\|router\|affect\|state\|builder\|assembly\|models\|proactive\|role_store\|parsers\|updaters\|context_manager\)\b"` 无残留旧路径
 - [ ] `grep -rn "import astrbot" core/` 输出为空
 - [ ] `tests/` 中的 import 同步更新
@@ -1059,8 +1058,11 @@ tier 统计（`initialize:189-196`）保持内联——一次性日志格式化�
 | **B. 增加插件本地 `ruff.toml`** | 让插件自成一体，不再继承 AstrBot 根配置 | 需要在该文件里补齐根配置中插件实际用到的规则；若 AstrBot 后续调整规则，插件不再自动跟随 |
 | **C. 修复 `tests/` 的既有 lint 与格式债** | 单独提交 `style:` | 与重构无关的 diff；但收益明确且风险为零 |
 
-**决定**：采用 **A + C**。重构期间全程用显式路径（A），重构收尾后一次性清债（C）。
-**B 暂不做**：当前 AstrBot 根配置已够用，引入本地 `ruff.toml` 会带来"规则不再自动跟随上游"的长期维护成本。
+**决定**：采用 **A + B + C**。
+- **A**：重构期间全程用显式路径（不改动工具链，避免污染各阶段 diff）。
+- **C**：重构收尾后一次性清债（已完成，见下）。
+- **B**：最终**采纳**（见下）。评估结论由「暂不做」改为「做」——因为实测发现自带配置不只解决排除问题，
+  还修正了包分类与 target-version 两处更实质的风险。
 
 #### ✅ §7.4 执行结果：C 已完成
 
@@ -1075,6 +1077,27 @@ tier 统计（`initialize:189-196`）保持内联——一次性日志格式化�
 > `tests/test_loader.py` 的 `F401` 在 §7.1 接通 TTL 时已被新测试的返回类型注解顺带消除（11 → 10），
 > 因此本项实际处理的是 10 处 lint + 8 个格式文件。
 > README 的「改完必须自检」一节已同步：三条命令现在应当**全部零告警/全绿**，不再有例外说明。
+
+#### ✅ §7.4 执行结果：B 已完成（`01cbdf1`）
+
+新增 `ruff.toml`（25 行），规则集逐项镜像上游，唯一差异是**去掉 `exclude` 中的 `"tests"`**。
+落地前先测了"是否等价"，结果暴露出自带配置的三项收益与一项代价：
+
+| 收益 | 说明 |
+|---|---|
+| `.` 重新可信 | `ruff check .` 覆盖 **192** 个文件（含 20 个测试文件），不再静默跳过测试目录 |
+| 包分类修正 | `project_root` 由 AstrBot 根变为插件目录，`astrbot_plugin_Firefly`（本插件代码）由「三方」回到「一方」、`astrbot` 归为三方 —— 这正是 P0 期间导入顺序显得别扭的根因。随之重排 `tests/test_behavior_anchor.py`、`tests/test_injector.py` 两个文件 |
+| target-version 钉住 | 上游当前是 `py310`（合适），但若上游升到 `py312`，ruff 会静默放行 3.11+ 专有语法，破坏插件自己声明的 3.10+ 兼容性承诺。自带配置把这条承诺固定下来 |
+
+| 代价 | 说明 |
+|---|---|
+| 规则集分叉 | 上游调整 `select`/`ignore` 后本文件不会自动跟随，需人工同步（已在 `ruff.toml` 内注明出处；规则集仅 8 组且稳定） |
+
+> `extend = "../../../pyproject.toml"` 本可避免分叉，但相对路径只在当前嵌套下成立——
+> 插件被独立分发时会因找不到目标而报错，故不采用。
+
+**验证**：`ruff check .` → All checks passed；`ruff format --check .` → 192 files already formatted；
+`Ran 223 tests — OK`。README 与 §6.3 的「必须显式传路径」说明已改为直接使用 `.`。
 
 ---
 
@@ -1160,5 +1183,6 @@ tier 统计（`initialize:189-196`）保持内联——一次性日志格式化�
 - [x] **§7.1 死配置处理**：`tier1_reserved` / 3 个 TTL / `get_default_ttl()` 接通，`state.use_llm` 删除；`c4582c0` `5318edc` `98bcbe2`
 - [ ] 另立任务：状态落盘策略（X1）
 - [x] **§7.4 选项 C：清理 `tests/` 既有 lint/格式债**；`e6e7f26`
+- [x] **§7.4 选项 B：新增自带 `ruff.toml`**（`.` 覆盖 tests + 修正包分类 + 钉住 target-version）；`01cbdf1`
 - [ ] 另立任务：X5 `core` 别名改名 + X6 `commands.py` 测试覆盖
 - [ ] 人工：重启 AstrBot 逐 Tab 复验面板，并按实测占用校准 `tier1_reserved`（§7.1）
