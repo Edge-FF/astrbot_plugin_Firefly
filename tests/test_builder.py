@@ -93,5 +93,56 @@ class TestShellBuilder(unittest.TestCase):
         self.assertIn("崩铁", result.text)
 
 
+class TestTier1Reserved(unittest.TestCase):
+    """`tier1_reserved` 必须真实参与激活条目的预算分配（曾硬编码为 830）。"""
+
+    def _truncated(self, reserved: int) -> tuple[str, ...]:
+        """用给定预留量组装一条超长激活条目，返回被裁剪的条目 ID。
+
+        Args:
+            reserved: 常驻块预留量。
+
+        Returns:
+            被裁剪的条目 ID 元组。
+        """
+        builder = ShellBuilder(max_tokens=300, tier1_reserved=reserved)
+        entry = _entry(id="skill_big", content="内" * 300, tier=3, kind="skill")
+        active = ActivatedEntry(entry_id="skill_big", remaining_ttl=3, strength=1.0)
+        result = builder.build(
+            tier1_entries=[],
+            state=SessionState(session_id="s1"),
+            active_entries=[(active, entry)],
+        )
+        return result.truncated
+
+    def test_default_reservation_matches_legacy_budget(self):
+        """默认预留量为 830 —— 与接通前的硬编码一致，保证行为不变。"""
+        self.assertEqual(ShellBuilder()._tier1_reserved, 830)
+
+    def test_larger_reservation_truncates_active_entry(self):
+        """预留量调大后，同样内容会被挤出预算并被裁剪。"""
+        self.assertEqual(self._truncated(reserved=100), (), "预留量小时不应裁剪")
+        self.assertEqual(
+            self._truncated(reserved=830), ("skill_big",), "预留量大时应裁剪"
+        )
+
+    def test_zero_reservation_gives_all_budget_to_active(self):
+        """预留量为 0 时全部预算交给激活条目，不触发裁剪。"""
+        builder = ShellBuilder(max_tokens=300, tier1_reserved=0)
+        entry = _entry(id="skill_small", content="短" * 20, tier=3, kind="skill")
+        active = ActivatedEntry(entry_id="skill_small", remaining_ttl=3, strength=1.0)
+        result = builder.build(
+            tier1_entries=[],
+            state=SessionState(session_id="s1"),
+            active_entries=[(active, entry)],
+        )
+        self.assertIn("skill_small", result.text)
+        self.assertEqual(result.truncated, ())
+
+    def test_negative_reservation_is_clamped_to_zero(self):
+        """负值被钳制为 0，不会把激活预算放大到超过总预算。"""
+        self.assertEqual(ShellBuilder(tier1_reserved=-500)._tier1_reserved, 0)
+
+
 if __name__ == "__main__":
     unittest.main()

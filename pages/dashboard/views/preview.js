@@ -111,9 +111,9 @@ function renderResult(data) {
         ? el("div", { class: "badge badge-skip", style: { marginBottom: "8px" }, text: "超预算!" })
         : null,
       budgetBar(
-        "Tier1 核心人格",
-        budget.tier1_reserved || 600,
-        budget.tier1_reserved || 600,
+        "常驻预留 (Tier1+状态)",
+        budget.tier1_reserved || 830,
+        budget.tier1_reserved || 830,
         "bar-tier1",
       ),
       ...activeBars,

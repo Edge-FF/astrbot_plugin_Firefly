@@ -25,7 +25,7 @@ class ShellConfig:
     enabled_sessions: tuple[str, ...] = ()
 
     # 注入预算
-    tier1_reserved: int = 600
+    tier1_reserved: int = 830
 
     # 路由器
     router_use_llm: bool = True
@@ -88,7 +88,7 @@ class ShellConfig:
             ),
             enabled_sessions=tuple(str(s) for s in enabled_sessions if str(s).strip()),
             tier1_reserved=coerce_int(
-                inject.get("tier1_reserved"), 600, warnings, "inject.tier1_reserved"
+                inject.get("tier1_reserved"), 830, warnings, "inject.tier1_reserved"
             ),
             router_use_llm=coerce_bool(
                 router_cfg.get("use_llm"), False, warnings, "router.use_llm"

@@ -30,13 +30,17 @@ _SHELL_INTRO = (
 class ShellBuilder:
     """认知外壳组装器（纯函数，无副作用，可单测）。"""
 
-    def __init__(self, max_tokens: int = 1500) -> None:
+    def __init__(self, max_tokens: int = 1500, tier1_reserved: int = 830) -> None:
         """初始化组装器。
 
         Args:
             max_tokens: 默认总 token 预算。
+            tier1_reserved: 常驻块（Tier1 人格 + 动态状态 + XML 包装）的预留
+                token 预算；这部分不参与激活条目的分配，实际占用会随资料
+                大小浮动。设为 0 则全部预算都给激活条目。
         """
         self._max_tokens = max_tokens
+        self._tier1_reserved = max(tier1_reserved, 0)
 
     def build(
         self,
@@ -57,7 +61,9 @@ class ShellBuilder:
 
         static_block = self._build_tier1(tier1_entries)
         state_block = self._build_state(state)
-        active_block, truncated = self._build_active(active_entries, budget)
+        active_block, truncated = self._build_active(
+            active_entries, budget, self._tier1_reserved
+        )
 
         full_text = self._wrap(static_block, state_block, active_block)
         estimated = self._estimate_tokens(full_text)
@@ -107,13 +113,23 @@ class ShellBuilder:
     def _build_active(
         entries: Sequence[tuple[ActivatedEntry, MaterialEntry]],
         total_budget: int,
+        tier1_reserved: int,
     ) -> tuple[str, list[str]]:
-        """按 strength 降序组装激活条目，超预算时从尾部裁剪。"""
+        """按 strength 降序组装激活条目，超预算时从尾部裁剪。
+
+        Args:
+            entries: 激活条目及其 ActivatedEntry。
+            total_budget: 总 token 预算。
+            tier1_reserved: 常驻块预留量，从总预算中扣除后再分配给激活条目。
+
+        Returns:
+            (`<active_context>` 块文本, 被裁剪的条目 ID 列表)。
+        """
         if not entries:
             return "", []
 
         sorted_entries = sorted(entries, key=lambda x: -x[0].strength)
-        max_active_budget = max(total_budget - 830, 100)
+        max_active_budget = max(total_budget - tier1_reserved, 100)
 
         truncated: list[str] = []
         items: list[str] = []

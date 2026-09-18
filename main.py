@@ -121,7 +121,10 @@ class FireflyPlugin(FireflyCommandMixin, star.Star):
             strength_decay=cfg.strength_decay_per_turn,
             min_strength=cfg.min_strength,
         )
-        builder = ShellBuilder(max_tokens=cfg.max_tokens)
+        builder = ShellBuilder(
+            max_tokens=cfg.max_tokens,
+            tier1_reserved=cfg.tier1_reserved,
+        )
         assembly = ShellAssembly(registry, ctx_manager, builder)
 
         # 调试记录器

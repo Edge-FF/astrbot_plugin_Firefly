@@ -21,10 +21,10 @@
                 }
             },
             "tier1_reserved": {
-                "description": "Tier1（核心人格）预留 token 预算",
+                "description": "常驻块预留 token 预算（Tier1 人格 + 动态状态 + XML 包装）",
                 "type": "int",
-                "default": 600,
-                "hint": "核心人格不可裁剪，此为预估上限。",
+                "default": 830,
+                "hint": "这部分不参与激活条目的分配。调小会让激活条目分到更多预算，但常驻块实际占用超出预留时整体可能超出总预算；调大则激活条目更容易被裁剪。",
                 "slider": {
                     "min": 100,
                     "max": 3000,
