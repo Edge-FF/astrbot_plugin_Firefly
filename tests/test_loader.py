@@ -386,5 +386,77 @@ class TestMaterialRegistry(unittest.TestCase):
             self.assertLessEqual(len(registry._content_cache), 12)
 
 
+class TestDefaultTtlLookup(unittest.TestCase):
+    """`default_ttl_lookup` 必须真实参与条目加载（配置项曾完全不生效）。"""
+
+    def _load_one(self, lookup, frontmatter: str = "") -> MaterialEntry:
+        """写入一条 skill 资料并加载，返回该条目。
+
+        Args:
+            lookup: kind → TTL 的查询函数；None 表示不注入。
+            frontmatter: 写入文件 front-matter 的附加行。
+
+        Returns:
+            加载后的 MaterialEntry。
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            role_dir = Path(tmp)
+            _write(
+                role_dir,
+                "技能/机甲.md",
+                f"---\nid: skill_mech\n{frontmatter}---\n战斗说明。",
+            )
+            registry = MaterialRegistry(role_dir, default_ttl_lookup=lookup)
+            registry.load()
+            return registry.get("skill_mech")
+
+    def test_lookup_overrides_builtin_map(self):
+        """注入查询函数后，条目 TTL 取自配置而非内置映射。"""
+        entry = self._load_one(lambda kind: {consts.KIND_SKILL: 9}.get(kind, 0))
+        self.assertEqual(entry.default_ttl, 9)
+
+    def test_without_lookup_uses_builtin_map(self):
+        """未注入查询函数时沿用内置映射（行为与接通前一致）。"""
+        entry = self._load_one(None)
+        self.assertEqual(entry.default_ttl, consts.DEFAULT_TTL_MAP[consts.KIND_SKILL])
+
+    def test_frontmatter_still_wins_over_lookup(self):
+        """资料文件里显式写的 default_ttl 优先于配置。"""
+        entry = self._load_one(
+            lambda kind: {consts.KIND_SKILL: 9}.get(kind, 0),
+            frontmatter="default_ttl: 3\n",
+        )
+        self.assertEqual(entry.default_ttl, 3)
+
+    def test_lookup_is_re_queried_on_reload(self):
+        """reload 时重新查询：改配置后 reload 即可生效。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            role_dir = Path(tmp)
+            _write(role_dir, "技能/机甲.md", "---\nid: skill_mech\n---\n战斗说明。")
+            current = {consts.KIND_SKILL: 5}
+            registry = MaterialRegistry(
+                role_dir, default_ttl_lookup=lambda kind: current.get(kind, 0)
+            )
+            registry.load()
+            self.assertEqual(registry.get("skill_mech").default_ttl, 5)
+
+            current[consts.KIND_SKILL] = 11
+            registry.reload()
+
+            self.assertEqual(registry.get("skill_mech").default_ttl, 11)
+
+    def test_unknown_kind_is_not_queried_and_falls_back_to_zero(self):
+        """未知类型不查询配置，回退为 0（persona 等常驻类型不参与激活）。"""
+        queried: list[str] = []
+
+        def _lookup(kind: str) -> int:
+            queried.append(kind)
+            return 7
+
+        entry = self._load_one(_lookup, frontmatter="kind: persona\n")
+        self.assertEqual(entry.default_ttl, 0)
+        self.assertNotIn(consts.KIND_PERSONA, queried)
+
+
 if __name__ == "__main__":
     unittest.main()

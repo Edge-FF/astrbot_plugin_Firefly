@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import unittest
 
+from astrbot_plugin_Firefly.core import consts
 from astrbot_plugin_Firefly.core.config import ProactiveConfig, ShellConfig
 
 
@@ -177,6 +178,34 @@ class TestProactiveConfigFromDict(unittest.TestCase):
         """sessions 传字符串时规范为单元素元组。"""
         cfg = ProactiveConfig.from_dict({"proactive": {"sessions": "a"}})
         self.assertEqual(cfg.sessions, ("a",))
+
+
+class TestGetDefaultTtl(unittest.TestCase):
+    """`get_default_ttl`：配置值 → kind 兜底 TTL（该方法曾零调用点）。"""
+
+    def test_returns_configured_value_per_kind(self) -> None:
+        """三种已知类型各自返回对应配置项。"""
+        cfg = ShellConfig(
+            default_skill_ttl=9, default_lore_ttl=3, default_narrative_ttl=7
+        )
+        self.assertEqual(cfg.get_default_ttl(consts.KIND_SKILL), 9)
+        self.assertEqual(cfg.get_default_ttl(consts.KIND_LORE), 3)
+        self.assertEqual(cfg.get_default_ttl(consts.KIND_NARRATIVE), 7)
+
+    def test_unknown_kind_falls_back_to_builtin_map(self) -> None:
+        """未知类型（含 persona）回退到内置映射，不以 1 冒充兜底值。"""
+        cfg = ShellConfig()
+        self.assertEqual(cfg.get_default_ttl(consts.KIND_PERSONA), 0)
+        self.assertEqual(cfg.get_default_ttl("nope"), 0)
+
+    def test_defaults_match_builtin_map(self) -> None:
+        """配置默认值与内置映射一致 —— 接通配置不改变默认行为。"""
+        cfg = ShellConfig()
+        for kind in (consts.KIND_SKILL, consts.KIND_LORE, consts.KIND_NARRATIVE):
+            with self.subTest(kind=kind):
+                self.assertEqual(
+                    cfg.get_default_ttl(kind), consts.DEFAULT_TTL_MAP[kind]
+                )
 
 
 if __name__ == "__main__":

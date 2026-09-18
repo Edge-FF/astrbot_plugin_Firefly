@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 from collections import OrderedDict
+from collections.abc import Callable
 from pathlib import Path
 
 from .. import consts
@@ -25,15 +26,25 @@ class MaterialRegistry:
     - reload() 失败时回退到上一份索引，避免运行时注入中断。
     """
 
-    def __init__(self, role_dir: Path, cache_size: int = 50) -> None:
+    def __init__(
+        self,
+        role_dir: Path,
+        cache_size: int = 50,
+        default_ttl_lookup: Callable[[str], int] | None = None,
+    ) -> None:
         """初始化注册表。
 
         Args:
-            role_dir: role/ 资料目录的路径。
-            cache_size: 内容 LRU 缓存上限（至少 10 条）。
+            role_dir: role/ 根目录路径。
+            cache_size: 内容 LRU 缓存上限（最小 10）。
+            default_ttl_lookup: 可选的 kind → 默认 TTL 查询函数（来自插件配置）。
+                为 None 时使用 `consts.DEFAULT_TTL_MAP`。每次 `load()` 会重新
+                查询一次，因此改配置后调用 `reload()` 即可生效。
         """
         self._role_dir = Path(role_dir)
         self._cache_size = max(cache_size, 10)
+        self._default_ttl_lookup = default_ttl_lookup
+        self._ttl_defaults: dict[str, int] = dict(consts.DEFAULT_TTL_MAP)
 
         # 全量索引 (id → MaterialEntry)，始终在内存中（元数据）
         self._index: dict[str, MaterialEntry] = {}
@@ -60,6 +71,15 @@ class MaterialRegistry:
         new_index: dict[str, MaterialEntry] = {}
         self._content_cache.clear()
         self._index_summary_cache = ""
+
+        # 每次 load 重新取一次默认 TTL：配置改动后 reload 即可生效，
+        # 同时避免在逐条目解析时重复解析插件配置。
+        lookup = self._default_ttl_lookup
+        self._ttl_defaults = (
+            {kind: lookup(kind) for kind in consts.DEFAULT_TTL_MAP}
+            if lookup is not None
+            else dict(consts.DEFAULT_TTL_MAP)
+        )
 
         self._scan_directory(new_index, warnings, self._role_dir)
 
@@ -228,8 +248,8 @@ class MaterialRegistry:
             f"{path.name} 的 {consts.FM_KEY_PRIORITY}",
         )
         default_ttl = coerce_int(
-            meta.get(consts.FM_KEY_DEFAULT_TTL) or consts.DEFAULT_TTL_MAP.get(kind, 0),
-            consts.DEFAULT_TTL_MAP.get(kind, 0),
+            meta.get(consts.FM_KEY_DEFAULT_TTL) or self._ttl_defaults.get(kind, 0),
+            self._ttl_defaults.get(kind, 0),
             warnings,
             f"{path.name} 的 {consts.FM_KEY_DEFAULT_TTL}",
         )

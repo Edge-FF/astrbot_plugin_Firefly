@@ -12,6 +12,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from . import consts
 from .materials.parsers import coerce_bool, coerce_float, coerce_int
 
 
@@ -175,21 +176,24 @@ class ShellConfig:
         return session_id in self.enabled_sessions
 
     def get_default_ttl(self, kind: str) -> int:
-        """按资料类型获取默认激活轮数。
+        """按资料类型获取默认激活轮数（供资料加载时作为兜底 TTL）。
+
+        按 `consts.KIND_*` 判定，未知类型回退到 `consts.DEFAULT_TTL_MAP.get(kind, 0)`，
+        与注册表自身的回退语义保持一致（persona 等常驻类型因此为 0）。
 
         Args:
-            kind: 资料类型（skill/lore/narrative 等）。
+            kind: 资料类型（skill / lore / narrative 等）。
 
         Returns:
-            对应的默认 TTL；未知类型返回 1。
+            对应的默认 TTL；无对应配置时回退为 `consts.DEFAULT_TTL_MAP` 的值。
         """
-        if kind == "skill":
+        if kind == consts.KIND_SKILL:
             return self.default_skill_ttl
-        if kind == "lore":
+        if kind == consts.KIND_LORE:
             return self.default_lore_ttl
-        if kind == "narrative":
+        if kind == consts.KIND_NARRATIVE:
             return self.default_narrative_ttl
-        return 1
+        return consts.DEFAULT_TTL_MAP.get(kind, 0)
 
 
 @dataclass(frozen=True)

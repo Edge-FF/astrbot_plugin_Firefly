@@ -88,6 +88,9 @@ class FireflyPlugin(FireflyCommandMixin, star.Star):
         registry = MaterialRegistry(
             self._role_dir,
             cache_size=cfg.content_cache_max_entries,
+            # 默认 TTL 由 active_context.default_*_ttl 决定。
+            # 传函数而非快照：资料 reload 时能取到最新配置。
+            default_ttl_lookup=lambda kind: config_getter().get_default_ttl(kind),
         )
         store = StateStore(
             data_dir / "cognitive_state.json",
