@@ -505,7 +505,7 @@ async function promptUnsavedChanges(action) {
     title: "有未保存的改动",
     intro: "「" + name + "」有未保存的改动，" + action + "会丢弃它们。",
     actions: [
-      { value: "cancel", label: "取消", class: "btn btn-ghost" },
+      { value: "cancel", label: "取消", class: "btn btn-ghost", skipValidate: true },
       { value: "discard", label: "丢弃改动", class: "btn btn-danger" },
       { value: "save", label: "保存后继续", class: "btn", default: true },
     ],
@@ -945,7 +945,7 @@ async function createFileFlow() {
       { name: "name", label: "文件名", placeholder: "例如：讲笑话.md", hint: "留空的 .md 会自动补上" },
     ],
     actions: [
-      { value: "cancel", label: "取消", class: "btn btn-ghost" },
+      { value: "cancel", label: "取消", class: "btn btn-ghost", skipValidate: true },
       { value: "create", label: "创建并编辑", class: "btn", default: true },
     ],
     validate: (values) => {
@@ -1007,7 +1007,7 @@ async function renameFlow() {
       { name: "name", label: "文件名", value: currentName, hint: "留空的 .md 会自动补上" },
     ],
     actions: [
-      { value: "cancel", label: "取消", class: "btn btn-ghost" },
+      { value: "cancel", label: "取消", class: "btn btn-ghost", skipValidate: true },
       { value: "rename", label: "重命名", class: "btn", default: true },
     ],
     validate: (values) => {
@@ -1079,7 +1079,7 @@ async function deleteFlow() {
     intro,
     fields,
     actions: [
-      { value: "cancel", label: "取消", class: "btn btn-ghost" },
+      { value: "cancel", label: "取消", class: "btn btn-ghost", skipValidate: true },
       { value: "delete", label: "确认删除", class: "btn btn-danger", default: true },
     ],
     validate: (values) => {

@@ -9,10 +9,19 @@ import * as injectionsView from "./views/injections.js";
 import * as stateView from "./views/state.js";
 import * as routeView from "./views/route.js";
 import * as materialsView from "./views/materials.js";
+import * as userRoleView from "./views/user-role.js";
 import * as previewView from "./views/preview.js";
 import * as statsView from "./views/stats.js";
 
-const VIEWS = [injectionsView, stateView, routeView, materialsView, previewView, statsView];
+const VIEWS = [
+  injectionsView,
+  stateView,
+  routeView,
+  materialsView,
+  userRoleView,
+  previewView,
+  statsView,
+];
 
 const entries = [];
 let currentTab = VIEWS[0].id;

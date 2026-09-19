@@ -100,7 +100,8 @@ export function toast(message, type) {
  * @param {string} [options.title] 标题。
  * @param {string} [options.intro] 说明文本。
  * @param {Array<object>} [options.fields] 字段定义 {name, label, type, options, value, placeholder, hint}。
- * @param {Array<object>} [options.actions] 动作 {value, label, class, default}。
+ * @param {Array<object>} [options.actions] 动作 {value, label, class, default, skipValidate}。
+ *   skipValidate 为真时点击该动作不触发 validate（用于「取消」等非提交动作）。
  * @param {Function} [options.validate] 提交前校验 (values) => 错误文本或 null。
  * @returns {Promise<{action: any, values: Record<string, string>}|null>} 取消（Esc / 点遮罩）返回 null。
  */
@@ -129,12 +130,22 @@ export function formDialog({ title, intro, fields = [], actions = [], validate }
           el("label", { class: "toggle-row" }, [control, field.text || field.label]),
         );
         return;
+      } else if (field.type === "textarea") {
+        control = el("textarea", {
+          class: "editor",
+          name: field.name,
+          rows: field.rows || 12,
+          spellcheck: "false",
+          readonly: field.readonly ? "" : null,
+        });
+        control.value = field.value == null ? "" : field.value;
       } else {
         control = el("input", {
           class: "input",
           type: "text",
           name: field.name,
           placeholder: field.placeholder || "",
+          readonly: field.readonly ? "" : null,
         });
         control.value = field.value == null ? "" : field.value;
       }
@@ -181,7 +192,9 @@ export function formDialog({ title, intro, fields = [], actions = [], validate }
     };
     const submit = (value) => {
       const values = readValues();
-      if (validate) {
+      const action = actions.find((item) => item.value === value);
+      // 取消等非提交动作不应触发校验，否则空表单下无法关闭弹窗
+      if (validate && action && !action.skipValidate) {
         const message = validate(values);
         if (message) {
           errorBox.textContent = message;
