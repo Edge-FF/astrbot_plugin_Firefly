@@ -33,6 +33,8 @@ from .core.proactive.policy import ProactivePolicy
 from .core.routing.router import ContextRouter, FallbackRouter, KeywordRouter, LLMRouter
 from .core.shell.assembly import ShellAssembly
 from .core.shell.builder import ShellBuilder
+from .core.user_role.service import UserRoleService
+from .core.user_role.store import UserRoleStore
 
 
 @dataclass
@@ -51,6 +53,8 @@ class FireflyCore:
     config_getter: Callable[[], ShellConfig]  # 外壳配置读取器（注入与面板共用）
     proactive_config_getter: Callable[[], ProactiveConfig]  # 主动消息配置读取器
     proactive: ProactiveRunner  # 主动消息执行器（命令与面板读取）
+    user_role_store: UserRoleStore  # 用户身份设置仓库（命令与面板读取）
+    user_role_service: UserRoleService  # 身份应用服务（命令读写会话覆盖）
     recorder: DebugRecorder | None = None  # 注入记录器（面板读取）
 
 
@@ -97,6 +101,15 @@ class FireflyPlugin(FireflyCommandMixin, star.Star):
             persist=cfg.persist_state,
             logger=self.logger,
         )
+        # 用户身份设置：与动态状态物理隔离，/firefly reset 不会清除
+        user_role_store = UserRoleStore(
+            data_dir / "user_role.json",
+            persist=cfg.persist_state,
+            logger=self.logger,
+        )
+        user_role_service = UserRoleService(
+            user_role_store, registry, logger=self.logger
+        )
 
         affect = AffectEngine()
 
@@ -127,8 +140,9 @@ class FireflyPlugin(FireflyCommandMixin, star.Star):
         builder = ShellBuilder(
             max_tokens=cfg.max_tokens,
             tier1_reserved=cfg.tier1_reserved,
+            user_profile_max_tokens=cfg.user_profile_max_tokens,
         )
-        assembly = ShellAssembly(registry, ctx_manager, builder)
+        assembly = ShellAssembly(registry, ctx_manager, builder, user_role_service)
 
         # 调试记录器
         recorder = DebugRecorder(
@@ -162,6 +176,8 @@ class FireflyPlugin(FireflyCommandMixin, star.Star):
             config_getter=config_getter,
             proactive_config_getter=proactive_config_getter,
             proactive=proactive,
+            user_role_store=user_role_store,
+            user_role_service=user_role_service,
             recorder=recorder,
         )
 
@@ -175,6 +191,7 @@ class FireflyPlugin(FireflyCommandMixin, star.Star):
             config_getter=config_getter,
             logger=self.logger,
             debug_recorder=recorder,
+            user_role_service=user_role_service,
         )
 
     async def initialize(self) -> None:
@@ -191,6 +208,9 @@ class FireflyPlugin(FireflyCommandMixin, star.Star):
 
         for warning in await self._core.store.load():
             self.logger.warning(f"[认知外壳] 动态状态告警：{warning}")
+
+        for warning in await self._core.user_role_store.load():
+            self.logger.warning(f"[认知外壳] 用户身份设置告警：{warning}")
 
         tier_counts: dict[int, int] = {}
         for entry in self._core.registry.all_entries():
@@ -210,11 +230,14 @@ class FireflyPlugin(FireflyCommandMixin, star.Star):
         self._register_debug_api()
         # 注册资料管理 API（只读 tree/file + 写路径 save/delete）
         self._register_role_api()
+        # 注册用户角色预设 API（get/set/reset）
+        self._register_user_role_api()
 
     async def terminate(self) -> None:
-        """插件停用时调用：停止主动消息并落盘保存动态状态。"""
+        """插件停用时调用：停止主动消息并落盘保存动态状态与用户身份设置。"""
         await self._core.proactive.stop()
         await self._core.store.close()
+        await self._core.user_role_store.close()
         self.logger.info("[认知外壳] 已停止，动态状态已保存。")
 
     @filter.on_llm_request()
@@ -374,8 +397,30 @@ class FireflyPlugin(FireflyCommandMixin, star.Star):
             registry=self._core.registry,
             state_store=self._core.store,
             logger=self.logger,
+            user_role_store=self._core.user_role_store,
         )
         role_api.register_routes()
         self.logger.info(
             f"[认知外壳] 资料管理 API 已注册（含写路径），路由数={len(self.context.registered_web_apis)}"
+        )
+
+    def _register_user_role_api(self) -> None:
+        """注册用户角色预设 API（当前 AstrBot 版本不支持时跳过）。"""
+        if not hasattr(self.context, "register_web_api"):
+            return
+
+        from .adapter.user_role_api import UserRoleApi
+        from .core.materials.role_store import RoleStore
+
+        user_role_api = UserRoleApi(
+            context=self.context,
+            service=self._core.user_role_service,
+            registry=self._core.registry,
+            role_store=RoleStore(self._role_dir),
+            logger=self.logger,
+        )
+        user_role_api.register_routes()
+        self.logger.info(
+            "[认知外壳] 用户角色 API 已注册"
+            f"（get/set/reset），路由数={len(self.context.registered_web_apis)}"
         )
