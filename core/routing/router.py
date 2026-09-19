@@ -49,6 +49,7 @@ class ContextRouter:
         user_msg: str,
         session_state: SessionState,
         registry: MaterialRegistry,
+        exclude_ids: frozenset[str] = frozenset(),
     ) -> RouteResult:
         """执行路由，返回本轮需要的条目 ID 与信号。
 
@@ -56,6 +57,8 @@ class ContextRouter:
             user_msg: 用户消息文本。
             session_state: 当前会话状态。
             registry: 资料注册表。
+            exclude_ids: 本轮不参与激活的条目 id 集合（如已作为常驻身份块
+                注入的 pin 条目）；空集表示无排除。
 
         Returns:
             路由结果（needed_ids 与 signals）。
@@ -95,13 +98,14 @@ class LLMRouter:
         user_msg: str,
         session_state: SessionState,
         registry: MaterialRegistry,
+        exclude_ids: frozenset[str] = frozenset(),
     ) -> RouteResult | None:
         """执行 LLM 路由，失败时返回 None（调用方降级到 KeywordRouter）。"""
         if self._llm_generate is None:
             return None
 
         user_input = self._build_prompt(user_msg, session_state, registry)
-        cache_key = self._cache_key(user_msg, session_state)
+        cache_key = self._cache_key(user_msg, session_state, exclude_ids)
         if self._cache_enabled:
             cached = self._get_cached(cache_key)
             if cached is not None:
@@ -112,7 +116,7 @@ class LLMRouter:
                 self._llm_generate(_ROUTER_SYSTEM_PROMPT, user_input),
                 timeout=self._timeout,
             )
-            result = self._parse_response(raw, registry, self._logger)
+            result = self._parse_response(raw, registry, self._logger, exclude_ids)
             if self._cache_enabled:
                 self._cache[cache_key] = (time.time(), result)
             return result
@@ -151,7 +155,10 @@ class LLMRouter:
 
     @staticmethod
     def _parse_response(
-        raw: str, registry: MaterialRegistry, logger: Any = None
+        raw: str,
+        registry: MaterialRegistry,
+        logger: Any = None,
+        exclude_ids: frozenset[str] = frozenset(),
     ) -> RouteResult:
         """解析 LLM 返回的 JSON，过滤非法 ID。
 
@@ -159,6 +166,7 @@ class LLMRouter:
             raw: LLM 原始输出。
             registry: 资料注册表（用于过滤不存在的条目 ID）。
             logger: 可选的日志记录器；解析失败时用于留痕。
+            exclude_ids: 本轮排除的条目 id（如已 pin 的用户身份）。
 
         Returns:
             解析出的路由结果；失败时返回空结果（source 仍标记为 llm）。
@@ -177,9 +185,14 @@ class LLMRouter:
             signals_raw = data.get("signals", {}) or {}
 
             valid_ids: list[str] = []
-            all_ids = {e.id for e in registry.all_entries()}
+            # 用户身份文档按会话 pin、不参与路由；exclude_ids 为会话级进一步排除
+            routable_ids = {
+                e.id
+                for e in registry.all_entries()
+                if e.kind != consts.KIND_USER_ROLE and e.id not in exclude_ids
+            }
             for rid in needed_ids:
-                if rid in all_ids:
+                if rid in routable_ids:
                     valid_ids.append(rid)
 
             signals = RouteSignals(
@@ -194,13 +207,25 @@ class LLMRouter:
                 )
             return RouteResult(source="llm")
 
-    def _cache_key(self, user_msg: str, session_state: SessionState) -> str:
-        """生成缓存键：用户消息前 50 字 + 激活 ID 哈希。"""
+    def _cache_key(
+        self,
+        user_msg: str,
+        session_state: SessionState,
+        exclude_ids: frozenset[str] = frozenset(),
+    ) -> str:
+        """生成缓存键：用户消息前 50 字 + 激活 ID 哈希 + 排除集哈希。
+
+        排除集必须入键：不同会话可能消息与激活集相同，但 pin 的身份不同，
+        否则会把 A 会话（排除 X）的路由结果错误复用到 B 会话（未排除 X）。
+        """
         msg_hash = hashlib.md5(user_msg[:50].encode()).hexdigest()[:8]
         active_hash = hashlib.md5(
             ",".join(session_state.active_context.active_ids).encode()
         ).hexdigest()[:8]
-        return f"{msg_hash}_{active_hash}"
+        exclude_hash = hashlib.md5(",".join(sorted(exclude_ids)).encode()).hexdigest()[
+            :8
+        ]
+        return f"{msg_hash}_{active_hash}_{exclude_hash}"
 
     def _get_cached(self, key: str) -> RouteResult | None:
         """查看缓存，过期（60 秒）后自动清除。"""
@@ -232,15 +257,21 @@ class KeywordRouter:
         user_msg: str,
         session_state: SessionState,
         registry: MaterialRegistry,
+        exclude_ids: frozenset[str] = frozenset(),
     ) -> RouteResult:
         """关键词/正则兜底路由：只匹配 Tier3/4，按分数与优先级排序。"""
         query = (user_msg or "").strip()
         if not query:
             return RouteResult(source="keyword")
 
-        # 只匹配 Tier3/4（Tier1/2 是常驻，不参与路由）
+        # 只匹配 Tier3/4（Tier1/2 是常驻，不参与路由）；
+        # 用户身份文档与 exclude_ids（已 pin 的条目）同样排除。
         candidates = [
-            e for e in registry.all_entries() if e.tier >= consts.TIER_SKILL_LORE
+            e
+            for e in registry.all_entries()
+            if e.tier >= consts.TIER_SKILL_LORE
+            and e.kind != consts.KIND_USER_ROLE
+            and e.id not in exclude_ids
         ]
         if not candidates:
             return RouteResult(source="keyword")
@@ -313,6 +344,7 @@ class FallbackRouter:
         user_msg: str,
         session_state: SessionState,
         registry: MaterialRegistry,
+        exclude_ids: frozenset[str] = frozenset(),
     ) -> RouteResult:
         """执行路由：先 LLM，失败时按配置降级关键词。
 
@@ -320,14 +352,19 @@ class FallbackRouter:
             user_msg: 用户消息文本。
             session_state: 当前会话状态。
             registry: 资料注册表。
+            exclude_ids: 本轮不参与激活的条目 id 集合。
 
         Returns:
             路由结果；LLM 失败且禁止降级时返回空结果。
         """
         if self._llm is not None:
-            result = await self._llm.route(user_msg, session_state, registry)
+            result = await self._llm.route(
+                user_msg, session_state, registry, exclude_ids=exclude_ids
+            )
             if result is not None:
                 return result
         if self._llm is None or self._fallback_to_keyword:
-            return await self._keyword.route(user_msg, session_state, registry)
+            return await self._keyword.route(
+                user_msg, session_state, registry, exclude_ids=exclude_ids
+            )
         return RouteResult(source="keyword")

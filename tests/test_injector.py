@@ -99,7 +99,7 @@ def _mk_messages():
 
 
 class _FakeRouter:
-    async def route(self, user_msg, session_state, registry):
+    async def route(self, user_msg, session_state, registry, exclude_ids=frozenset()):
         """固定返回空路由结果的假路由器。"""
         return RouteResult(needed_ids=[], signals=RouteSignals(), source="keyword")
 
@@ -115,7 +115,7 @@ class _SignalRouter:
         """
         self._user_emotion = user_emotion
 
-    async def route(self, user_msg, session_state, registry):
+    async def route(self, user_msg, session_state, registry, exclude_ids=frozenset()):
         """返回带用户情绪信号的路由结果。"""
         return RouteResult(
             needed_ids=[],

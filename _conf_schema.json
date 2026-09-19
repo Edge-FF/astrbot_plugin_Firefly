@@ -50,6 +50,23 @@
             }
         }
     },
+    "user_role": {
+        "description": "用户角色预设设置",
+        "type": "object",
+        "items": {
+            "user_profile_max_tokens": {
+                "description": "用户身份块长度上限（token）",
+                "type": "int",
+                "default": 600,
+                "hint": "身份块常驻且不可裁剪；超过该上限时仅截断身份块自身。全局默认身份与自定义角色的选择在对话命令或面板中设置。",
+                "slider": {
+                    "min": 50,
+                    "max": 3000,
+                    "step": 50
+                }
+            }
+        }
+    },
     "router": {
         "description": "上下文路由器设置",
         "type": "object",

@@ -33,7 +33,9 @@ class _StubRouter:
         self._result = result
         self.calls = 0
 
-    async def route(self, user_msg, session_state, registry) -> RouteResult | None:
+    async def route(
+        self, user_msg, session_state, registry, exclude_ids=frozenset()
+    ) -> RouteResult | None:
         """记录调用并返回固定结果。"""
         self.calls += 1
         return self._result

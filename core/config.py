@@ -27,6 +27,8 @@ class ShellConfig:
 
     # 注入预算
     tier1_reserved: int = 830
+    # 用户身份块长度上限（token）；独立于总预算，超限时截断身份块自身
+    user_profile_max_tokens: int = 600
 
     # 路由器
     router_use_llm: bool = True
@@ -73,6 +75,7 @@ class ShellConfig:
         router_cfg = data.get("router", {}) or {}
         active_cfg = data.get("active_context", {}) or {}
         cache_cfg = data.get("content_cache", {}) or {}
+        user_role_cfg = data.get("user_role", {}) or {}
 
         enabled_sessions = inject.get("enabled_sessions", []) or []
         if isinstance(enabled_sessions, str):
@@ -89,6 +92,16 @@ class ShellConfig:
             enabled_sessions=tuple(str(s) for s in enabled_sessions if str(s).strip()),
             tier1_reserved=coerce_int(
                 inject.get("tier1_reserved"), 830, warnings, "inject.tier1_reserved"
+            ),
+            # 下限 50：过小的上限会让身份块只剩截断标记，失去注入意义
+            user_profile_max_tokens=max(
+                coerce_int(
+                    user_role_cfg.get("user_profile_max_tokens"),
+                    600,
+                    warnings,
+                    "user_role.user_profile_max_tokens",
+                ),
+                50,
             ),
             router_use_llm=coerce_bool(
                 router_cfg.get("use_llm"), False, warnings, "router.use_llm"

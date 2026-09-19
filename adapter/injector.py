@@ -48,6 +48,8 @@ if TYPE_CHECKING:
     from ..core.materials.registry import MaterialRegistry
     from ..core.routing.router import ContextRouter
     from ..core.shell.assembly import ShellAssembly
+    from ..core.user_role.models import ResolvedUserRole
+    from ..core.user_role.service import UserRoleService
     from .astrbot_compat import ContextWrapper
     from .debug_recorder import DebugRecorder
 
@@ -66,6 +68,7 @@ class CognitiveShellInjector:
         config_getter: Callable[[], ShellConfig],
         logger: Any,
         debug_recorder: DebugRecorder | None = None,
+        user_role_service: UserRoleService | None = None,
     ) -> None:
         """初始化认知外壳注入器。
 
@@ -79,6 +82,7 @@ class CognitiveShellInjector:
             config_getter: 配置获取函数（每次调用返回最新配置）。
             logger: 日志记录器。
             debug_recorder: 调试记录器，可为 None。
+            user_role_service: 用户身份服务；None 表示不做身份解析与路由排除。
         """
         self._registry = registry
         self._store = store
@@ -89,6 +93,7 @@ class CognitiveShellInjector:
         self._config_getter = config_getter
         self._logger = logger
         self._debug_recorder = debug_recorder
+        self._user_role_service = user_role_service
         # 本轮路由信号：请求钩子写入，响应钩子消费（同一会话同轮次）
         self._pending_signals: dict[str, RouteSignals] = {}
 
@@ -169,7 +174,8 @@ class CognitiveShellInjector:
             return
 
         state = await self._store.get(session_id)
-        result = self._build_shell(state, config)
+        resolved = self._resolve_user_role(session_id)
+        result = self._build_shell(state, config, resolved)
         if result.is_empty():
             self._record_agent_begin(session_id, None, "empty_build")
             return
@@ -210,9 +216,17 @@ class CognitiveShellInjector:
         state = await self._store.get(session_id)
         state_before = state.snapshot()
 
+        # [A2] 解析用户身份：同一结果既用于路由排除，也用于身份块注入
+        resolved = self._resolve_user_role(session_id)
+
         # [B] ContextRouter.route()
         user_msg = getattr(event, "message_str", None) or req.prompt or ""
-        route_result = await self._router.route(user_msg, state, self._registry)
+        route_result = await self._router.route(
+            user_msg,
+            state,
+            self._registry,
+            exclude_ids=self._exclude_ids(resolved),
+        )
 
         # [C] ActiveContextManager.merge()
         new_ctx = self._ctx_manager.merge(
@@ -221,7 +235,7 @@ class CognitiveShellInjector:
         state.active_context = new_ctx
 
         # [D] 组装外壳（复用层）
-        result = self._build_shell(state, config)
+        result = self._build_shell(state, config, resolved)
         if result.is_empty():
             self._record_skip(event, req, session_id, ts, "empty_build")
             return
@@ -327,22 +341,63 @@ class CognitiveShellInjector:
             return "empty_registry"
         return None
 
-    def _build_shell(self, state: SessionState, config: ShellConfig) -> BuildResult:
-        """组装外壳并在超预算时告警（两条路径共用）。
+    def _resolve_user_role(self, session_id: str) -> ResolvedUserRole | None:
+        """解析会话的用户身份；未配置身份服务时返回 None（等价"无身份"）。
+
+        `UserRoleService.resolve` 已保证不抛异常（读取失败降级为无身份），
+        因此这里只需在发生降级时留痕，不再额外吞异常。
+
+        Args:
+            session_id: 会话唯一标识。
+
+        Returns:
+            解析结果；无服务时 None。
+        """
+        if self._user_role_service is None:
+            return None
+        resolved = self._user_role_service.resolve(session_id)
+        if resolved.warning:
+            self._logger.debug(f"[认知外壳] 用户身份降级：{resolved.warning}")
+        return resolved
+
+    @staticmethod
+    def _exclude_ids(resolved: ResolvedUserRole | None) -> frozenset[str]:
+        """把已 pin 的身份条目转成路由排除集。
+
+        Args:
+            resolved: 身份解析结果，可为 None。
+
+        Returns:
+            含 pin_id 的单元素集合；无 pin 时为空集。
+        """
+        if resolved is None or not resolved.pin_id:
+            return frozenset()
+        return frozenset({resolved.pin_id})
+
+    def _build_shell(
+        self,
+        state: SessionState,
+        config: ShellConfig,
+        resolved: ResolvedUserRole | None = None,
+    ) -> BuildResult:
+        """组装外壳并在超预算/身份截断时告警（两条路径共用）。
 
         Args:
             state: 会话状态。
             config: 当前外壳配置（提供 token 预算）。
+            resolved: 已解析的用户身份；透传给组装层，避免重复解析。
 
         Returns:
             组装结果；调用方需自行判断 ``is_empty()``。
         """
-        result = self._assembly.build(state, config.max_tokens)
+        result = self._assembly.build(state, config.max_tokens, resolved=resolved)
         if result.over_budget or result.truncated:
             self._logger.warning(
                 f"[认知外壳] token 超预算：{result.over_budget}，"
                 f"本次裁剪的激活条目：{list(result.truncated)}"
             )
+        if result.user_profile_truncated:
+            self._logger.warning("[认知外壳] 用户身份块超过上限，本次已截断。")
         return result
 
     @staticmethod

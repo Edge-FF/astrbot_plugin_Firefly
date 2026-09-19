@@ -273,6 +273,8 @@ class BuildResult:
     text: str
     truncated: tuple[str, ...] = ()
     over_budget: bool = False
+    # 用户身份块因超过 `user_profile_max_tokens` 被截断（独立于激活条目裁剪）
+    user_profile_truncated: bool = False
 
     def is_empty(self) -> bool:
         """判断组装结果是否为空（无有效注入文本）。"""
