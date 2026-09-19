@@ -13,12 +13,18 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from ..core import consts
+from ..core.user_role.models import MODE_CUSTOM, normalize_mode
 from .api.http import HttpHelpers, error, ok
 
 if TYPE_CHECKING:
     from ..core.cognition.state import StateStore
     from ..core.materials.registry import MaterialRegistry
     from ..core.materials.role_store import RoleStore
+    from ..core.user_role.store import UserRoleStore
+
+# 全局默认身份的占位会话标记（删除守卫列出时使用，非真实会话 id）
+_DEFAULT_PIN_MARKER = "（全局默认身份）"
 
 
 class RoleApi(HttpHelpers):
@@ -34,6 +40,7 @@ class RoleApi(HttpHelpers):
         registry: MaterialRegistry,
         state_store: StateStore | None = None,
         logger: logging.Logger | None = None,
+        user_role_store: UserRoleStore | None = None,
     ) -> None:
         """初始化。
 
@@ -43,12 +50,14 @@ class RoleApi(HttpHelpers):
             registry: 资料注册表（写/删后重载，并附加运行时加载告警）。
             state_store: 会话状态仓库（用于"条目正被哪些会话使用"的删除守卫）。
             logger: 日志记录器。
+            user_role_store: 身份设置仓库（删除守卫需识别"正被 pin 的身份"）。
         """
         self._ctx = context
         self._store = store
         self._registry = registry
         self._state_store = state_store
         self._logger = logger
+        self._user_role_store = user_role_store
         self._plugin_name = "astrbot_plugin_Firefly"
         try:
             meta = getattr(context, "star_metadata", None)
@@ -193,18 +202,55 @@ class RoleApi(HttpHelpers):
     # ------------------------------------------------------------------
 
     async def _usage_map(self) -> dict[str, list[str]]:
-        """条目 id → 正在激活它的会话 id 列表。"""
-        if self._state_store is None:
-            return {}
-        try:
-            states = await self._state_store.all()
-        except Exception:
-            return {}
+        """条目 id → 正在使用它的会话 id 列表（激活上下文 + pin 身份）。
+
+        删除守卫必须同时覆盖两类"正在使用"：active_context 中的激活条目，以及
+        被用户身份预设 pin 的条目。否则删除他人身份文档时不会得到提示。
+        全局默认身份不属于任何具体会话，以 `_DEFAULT_PIN_MARKER` 占位列出。
+        """
         usage: dict[str, list[str]] = {}
-        for session_id, state in states.items():
-            for entry in state.active_context.entries:
-                usage.setdefault(entry.entry_id, []).append(session_id)
+
+        if self._state_store is not None:
+            try:
+                states = await self._state_store.all()
+            except Exception:
+                states = {}
+            for session_id, state in states.items():
+                for entry in state.active_context.entries:
+                    usage.setdefault(entry.entry_id, []).append(session_id)
+
+        if self._user_role_store is not None:
+            try:
+                for session_id, setting in self._user_role_store.all_sessions().items():
+                    if setting.role_id:
+                        usage.setdefault(setting.role_id, []).append(session_id)
+                default_pin = self._default_pin_id()
+                if default_pin:
+                    usage.setdefault(default_pin, []).append(_DEFAULT_PIN_MARKER)
+            except Exception:
+                # 守卫是"锦上添花"，身份仓库异常不应阻断资料树读取
+                pass
+
         return usage
+
+    def _default_pin_id(self) -> str:
+        """返回全局默认身份实际 pin 的条目 id。
+
+        `existing` 模式下 role_id 为空表示"内置默认身份"，需映射到
+        `consts.DEFAULT_USER_ROLE_ID`；`custom` 模式直接取 role_id。
+
+        Returns:
+            条目 id；无默认身份或读取失败时返回空串。
+        """
+        if self._user_role_store is None:
+            return ""
+        try:
+            setting = self._user_role_store.default_setting()
+        except Exception:
+            return ""
+        if normalize_mode(setting.mode) == MODE_CUSTOM:
+            return setting.role_id
+        return setting.role_id or consts.DEFAULT_USER_ROLE_ID
 
     async def _active_session_ids(self, path: str) -> list[str]:
         """查询某文件对应条目正被哪些会话使用（删除前的第三重守卫）。"""

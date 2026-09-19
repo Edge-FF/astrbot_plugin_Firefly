@@ -16,6 +16,12 @@ from astrbot_plugin_Firefly.core.cognition.state import StateStore
 from astrbot_plugin_Firefly.core.materials.registry import MaterialRegistry
 from astrbot_plugin_Firefly.core.materials.role_store import RoleStore
 from astrbot_plugin_Firefly.core.models import ActivatedEntry
+from astrbot_plugin_Firefly.core.user_role.models import (
+    MODE_CUSTOM,
+    MODE_EXISTING,
+    UserRoleSetting,
+)
+from astrbot_plugin_Firefly.core.user_role.store import UserRoleStore
 
 
 def _write(root: Path, rel: str, text: str) -> None:
@@ -247,6 +253,70 @@ class TestRoleApiGuards(unittest.IsolatedAsyncioTestCase):
         resp = await self.api._role_save()
         self.assertEqual(resp["status"], "error")
         self.assertIn("外部修改", resp["message"])
+
+
+class TestDeleteGuardIncludesPinned(unittest.IsolatedAsyncioTestCase):
+    """P2-2：删除守卫必须识别"正被 pin 为身份"的条目。
+
+    仅统计 `active_context` 会漏掉身份预设：用户把自己的角色文档设为身份后，
+    删除它不会得到提示，可能连同正在使用的设定一起删除。
+    """
+
+    def setUp(self) -> None:
+        """准备 role 目录、仓库与带身份仓库的 RoleApi。"""
+        self._tmp = tempfile.TemporaryDirectory()
+        base = Path(self._tmp.name)
+        self.root = base / "role"
+        self.root.mkdir()
+        _write(
+            self.root,
+            "人物关系/三月七.md",
+            "---\nid: npc_march7\nkind: lore\n---\n三月七资料。",
+        )
+        _write(
+            self.root,
+            "人物关系/丹恒.md",
+            "---\nid: npc_danheng\nkind: lore\n---\n丹恒资料。",
+        )
+        self.registry = MaterialRegistry(self.root)
+        self.registry.load()
+        self.user_role_store = UserRoleStore(base / "ur.json", persist=False)
+        self.api = RoleApi(
+            context=None,
+            store=RoleStore(self.root),
+            registry=self.registry,
+            state_store=StateStore(base / "state.json", persist=False),
+            user_role_store=self.user_role_store,
+        )
+        self.api._get_query = lambda key: None
+
+    def tearDown(self) -> None:
+        """清理临时目录。"""
+        self._tmp.cleanup()
+
+    async def test_pinned_session_triggers_guard(self) -> None:
+        """会话把某文档 pin 为身份时，删除守卫应列出该会话。"""
+        await self.user_role_store.set_session(
+            "sess_pin", UserRoleSetting(MODE_CUSTOM, "npc_march7")
+        )
+        ids = await self.api._active_session_ids("人物关系/三月七.md")
+        self.assertIn("sess_pin", ids)
+
+    async def test_global_default_triggers_guard(self) -> None:
+        """全局默认身份指向该文档时，也应触发守卫（以占位标记列出）。"""
+        await self.user_role_store.set_default(
+            UserRoleSetting(MODE_EXISTING, "npc_march7")
+        )
+        ids = await self.api._active_session_ids("人物关系/三月七.md")
+        self.assertIn("（全局默认身份）", ids)
+
+    async def test_unrelated_document_not_flagged(self) -> None:
+        """未被 pin 也无激活的其它文档不应误报。"""
+        await self.user_role_store.set_session(
+            "sess_pin", UserRoleSetting(MODE_CUSTOM, "npc_march7")
+        )
+        ids = await self.api._active_session_ids("人物关系/丹恒.md")
+        self.assertEqual(ids, [])
 
 
 if __name__ == "__main__":
