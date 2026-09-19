@@ -19,13 +19,13 @@ import hashlib
 import os
 import re
 import stat
-import tempfile
 import unicodedata
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
 from .. import consts
+from ..atomic_io import atomic_write_text
 from .parsers import (
     coerce_int,
     coerce_str_list,
@@ -197,33 +197,6 @@ def serialize_document(
     lines.extend(unknown_lines)
     lines.append("---")
     return "\n".join(lines) + "\n\n" + body.strip() + "\n"
-
-
-def _atomic_write(path: Path, text: str) -> None:
-    """同目录临时文件 + os.replace 原子替换，避免出现半文件。
-
-    临时文件名以 `.` 开头且后缀非 `.md`，即使进程崩溃残留也不会进入资料树。
-    """
-    path.parent.mkdir(parents=True, exist_ok=True)
-    handle = tempfile.NamedTemporaryFile(
-        mode="w",
-        encoding="utf-8",
-        newline="\n",
-        dir=str(path.parent),
-        prefix="." + path.name + ".",
-        suffix=".tmp",
-        delete=False,
-    )
-    temp_path = Path(handle.name)
-    try:
-        with handle:
-            handle.write(text)
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.replace(temp_path, path)
-    except BaseException:
-        temp_path.unlink(missing_ok=True)
-        raise
 
 
 def _has_hidden_segment(rel_posix: str) -> bool:
@@ -496,7 +469,7 @@ class RoleStore:
             raise RoleStoreError(f"文件超过 {MAX_DOCUMENT_BYTES // 1024} KiB 上限")
 
         try:
-            _atomic_write(path, text)
+            atomic_write_text(path, text)
         except OSError as exc:
             raise RoleStoreError(f"写入失败：{rel_posix}") from exc
         doc = self.read_document(rel_posix)

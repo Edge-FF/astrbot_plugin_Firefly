@@ -7,14 +7,11 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
-import tempfile
 from pathlib import Path
 from typing import Any
 
+from ..atomic_io import atomic_write_json
 from ..models import SessionState
-
-_JSON_OPTS = {"ensure_ascii": False, "indent": 2}
 
 
 class StateStore:
@@ -116,19 +113,7 @@ class StateStore:
                 for session_id, state in self._states.items()
             }
         try:
-            self._data_file.parent.mkdir(parents=True, exist_ok=True)
-            fd, tmp_path = tempfile.mkstemp(
-                dir=str(self._data_file.parent),
-                prefix=self._data_file.name,
-                suffix=".tmp",
-            )
-            try:
-                with os.fdopen(fd, "w", encoding="utf-8") as fh:
-                    json.dump(payload, fh, **_JSON_OPTS)
-                os.replace(tmp_path, self._data_file)
-            finally:
-                if os.path.exists(tmp_path):
-                    os.remove(tmp_path)
+            atomic_write_json(self._data_file, payload)
         except OSError as exc:
             # 落盘失败必须可见：否则用户会以为状态已保存，实际已丢失
             if self._logger is not None:
