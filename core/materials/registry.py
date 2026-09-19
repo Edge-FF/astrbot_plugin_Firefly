@@ -150,11 +150,17 @@ class MaterialRegistry:
         return list(self._index.values())
 
     def index_summary(self) -> str:
-        """供 LLM 路由使用的轻量摘要（只含 id/title/tags/kind/tier）。"""
+        """供 LLM 路由使用的轻量摘要（只含 id/title/tags/kind/tier）。
+
+        用户身份文档（`kind == user_role`）按会话 pin，不参与路由，因此不得
+        出现在摘要中：否则会跨会话泄露自定义身份，并浪费路由 token。
+        """
         if self._index_summary_cache:
             return self._index_summary_cache
         lines = []
         for entry in sorted(self._index.values(), key=lambda e: (e.tier, e.priority)):
+            if entry.kind == consts.KIND_USER_ROLE:
+                continue
             tags = "、".join(entry.tags[:5]) or "无标签"
             lines.append(
                 f"[T{entry.tier}][{entry.kind}] {entry.id} ({entry.title}) 标签:{tags}"

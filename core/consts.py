@@ -33,6 +33,8 @@ KIND_PERSONA = "persona"
 KIND_SKILL = "skill"
 KIND_LORE = "lore"
 KIND_NARRATIVE = "narrative"
+# 用户身份文档：由"用户角色预设"模块按会话 pin，永不参与路由（见 DESIGN_user_role.md）
+KIND_USER_ROLE = "user_role"
 
 # ============================================================================
 # 目录 → tier/kind 自动推断规则
@@ -53,6 +55,8 @@ DIRECTORY_TIER_RULES: tuple[tuple[str, int, str], ...] = (
     ("技能", TIER_SKILL_LORE, KIND_SKILL),
     ("人物关系", TIER_SKILL_LORE, KIND_LORE),
     ("世界知识", TIER_WORLD_NARRATIVE, KIND_LORE),
+    # 用户身份文档：可被 pin 为常驻身份，但不进入路由池
+    ("用户角色", TIER_SKILL_LORE, KIND_USER_ROLE),
 )
 
 # ============================================================================
@@ -66,11 +70,25 @@ DEFAULT_TTL_MAP: dict[str, int] = {
 }
 
 # ============================================================================
+# 用户角色预设
+# ============================================================================
+
+# 内置默认身份的条目 id（要求 role/人物关系/开拓者.md 的 frontmatter 显式声明）
+DEFAULT_USER_ROLE_ID = "trailblazer"
+# 自定义身份文档所在目录（role/ 下）
+USER_ROLE_CUSTOM_DIR = "用户角色"
+
+# 身份模式
+USER_ROLE_MODE_EXISTING = "existing"
+USER_ROLE_MODE_CUSTOM = "custom"
+
+# ============================================================================
 # 认知外壳注入块标签
 # ============================================================================
 
 SHELL_BLOCK_TAG = "cognitive_shell"
 SHELL_STATIC_TAG = "static_core"
+SHELL_USER_PROFILE_TAG = "user_profile"
 SHELL_STATE_TAG = "dynamic_state"
 SHELL_ACTIVE_TAG = "active_context"
 SHELL_ON_DEMAND_TAG = "shell_on_demand"
