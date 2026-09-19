@@ -10,6 +10,39 @@ from typing import Any
 from astrbot.api.event import AstrMessageEvent, MessageEventResult, filter
 from astrbot.api.event.filter import PermissionType, permission_type
 
+from ..core.user_role.models import (
+    MODE_CUSTOM,
+    MODE_EXISTING,
+    UserRoleSetting,
+    normalize_mode,
+)
+
+_ROLE_USAGE = (
+    "用法：/firefly role [status] | set existing [id] | set custom <id> | clear\n"
+    "  status        查看全局默认与本会话身份（默认动作）\n"
+    "  set existing  会话身份设为某个现有人物（省略 id 表示内置默认开拓者）\n"
+    "  set custom    会话身份设为某个自定义角色文档（id 必填）\n"
+    "  clear         清除本会话覆盖，回落到全局默认"
+)
+
+
+def _role_label(setting: UserRoleSetting, resolved: Any = None) -> str:
+    """把身份设置渲染为可读文本。
+
+    Args:
+        setting: 身份设置。
+        resolved: 该设置的解析结果，可为 None（仅展示原始 id）。
+
+    Returns:
+        形如「自定义角色 · 我的角色（my_role）」的文本。
+    """
+    mode = "自定义角色" if normalize_mode(setting.mode) == MODE_CUSTOM else "现有角色"
+    if resolved is not None and resolved.has_entry:
+        return f"{mode} · {resolved.entry.title}（{resolved.pin_id}）"
+    if normalize_mode(setting.mode) == MODE_EXISTING and not setting.role_id:
+        return "现有角色 · 内置默认（当前不可用）"
+    return f"{mode} · {setting.role_id or '未指定'}（不可用）"
+
 
 class FireflyCommandMixin:
     """/firefly 管理命令组。"""
@@ -194,6 +227,85 @@ class FireflyCommandMixin:
                 f"各会话（冲动/阈值）：\n{body}"
             )
         )
+
+    @permission_type(PermissionType.ADMIN)
+    @firefly.command("role")
+    async def firefly_role(
+        self,
+        event: AstrMessageEvent,
+        action: str = "status",
+        mode: str = "",
+        role_id: str = "",
+    ) -> None:
+        """[Admin] 用户角色身份：status | set existing|custom [id] | clear"""
+        core = self._core
+        service = core.user_role_service
+        target = event.unified_msg_origin or ""
+        act = (action or "status").strip().lower()
+
+        if act in ("", "status"):
+            default = service.default_setting()
+            override = service.session_setting(target)
+            resolved = service.resolve(target)
+            lines = [
+                "【用户角色 · 状态】",
+                f"全局默认：{_role_label(default, service.resolve_setting(default))}",
+                "本会话："
+                + (
+                    "未覆盖（跟随默认）"
+                    if override is None
+                    else _role_label(override, service.resolve_setting(override))
+                ),
+                "实际注入："
+                + (
+                    f"{resolved.entry.title}（{resolved.pin_id}）"
+                    if resolved.has_entry
+                    else "无有效身份"
+                ),
+            ]
+            if resolved.warning:
+                lines.append(f"告警：{resolved.warning}")
+            event.set_result(MessageEventResult().message("\n".join(lines)))
+            return
+
+        if act == "clear":
+            await service.clear_session(target)
+            event.set_result(
+                MessageEventResult().message(
+                    "【用户角色】已清除本会话的身份覆盖，回落到全局默认。"
+                )
+            )
+            return
+
+        if act == "set":
+            requested_mode = (mode or "").strip().lower()
+            if requested_mode not in (MODE_EXISTING, MODE_CUSTOM):
+                event.set_result(MessageEventResult().message(_ROLE_USAGE))
+                return
+            rid = (role_id or "").strip()
+            if requested_mode == MODE_CUSTOM and not rid:
+                event.set_result(
+                    MessageEventResult().message(
+                        "【用户角色】自定义模式必须提供 role_id。\n" + _ROLE_USAGE
+                    )
+                )
+                return
+            setting = UserRoleSetting(mode=requested_mode, role_id=rid)
+            resolved, invalid = service.validate_setting(setting)
+            if invalid:
+                event.set_result(
+                    MessageEventResult().message(f"【用户角色】设置失败：{invalid}")
+                )
+                return
+            await service.set_session(target, setting)
+            event.set_result(
+                MessageEventResult().message(
+                    f"【用户角色】本会话身份已设为：{_role_label(setting, resolved)}"
+                )
+            )
+            return
+
+        event.set_result(MessageEventResult().message(_ROLE_USAGE))
 
     def _set_proactive_enabled(self, enabled: bool) -> None:
         """在运行时切换主动消息开关（不写入配置文件）。
